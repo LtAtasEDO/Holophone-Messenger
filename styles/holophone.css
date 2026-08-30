@@ -1,0 +1,739 @@
+.holophone-dialog {
+  --holophone-accent: #00fff7;
+  --holophone-hover: #ffdd00;
+  --holophone-bg: #090d10;
+  --holophone-panel: #11171b;
+  --holophone-text: #eaffff;
+  --holophone-muted: #98ced0;
+  color: var(--holophone-text) !important;
+  max-width: 96vw;
+}
+
+.holophone-dialog .window-header {
+  color: var(--holophone-text) !important;
+  background: var(--holophone-bg) !important;
+  border: 2px solid var(--holophone-accent) !important;
+  border-bottom: 0 !important;
+  border-radius: 12px 12px 0 0 !important;
+}
+
+.holophone-dialog .window-title,
+.holophone-dialog .window-header .close,
+.holophone-dialog .window-header .popout {
+  color: var(--holophone-text) !important;
+  font-weight: 800;
+}
+
+.holophone-dialog .window-content {
+  padding: 10px !important;
+  overflow-y: auto;
+  color: var(--holophone-text) !important;
+  background-color: var(--holophone-bg) !important;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px) !important;
+  background-position: 0 0, 12px 12px !important;
+  background-size: 24px 24px !important;
+  border: 2px solid var(--holophone-accent) !important;
+  border-top: 0 !important;
+  border-radius: 0 0 12px 12px !important;
+}
+
+.holophone-dialog .dialog-buttons {
+  display: none !important;
+}
+
+.holophone-shell {
+  display: flex;
+  min-width: 680px;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--holophone-text);
+}
+
+.holophone-shell * {
+  box-sizing: border-box;
+}
+
+.holophone-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  background: rgba(12, 18, 22, 0.96);
+  border: 2px solid var(--holophone-accent);
+  border-radius: 10px;
+}
+
+.holophone-logo {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  place-items: center;
+  color: var(--holophone-accent);
+  background: #050708;
+  border: 2px solid var(--holophone-accent);
+  border-radius: 9px;
+  font-size: 27px;
+}
+
+.holophone-title {
+  color: var(--holophone-accent);
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.holophone-subtitle,
+.holophone-muted {
+  color: var(--holophone-muted);
+  font-size: 12px;
+}
+
+.holophone-grid-2,
+.holophone-emergency-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.holophone-card {
+  padding: 10px;
+  background: var(--holophone-panel);
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--holophone-accent) inset;
+}
+
+.holophone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.holophone-label,
+.holophone-section-title {
+  margin-bottom: 5px;
+  color: var(--holophone-accent);
+  font-weight: 900;
+}
+
+.holophone-shell input,
+.holophone-shell select,
+.holophone-shell textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px !important;
+  color: var(--holophone-text) !important;
+  caret-color: var(--holophone-accent);
+  background: rgba(0, 0, 0, 0.54) !important;
+  border: 1px solid var(--holophone-accent) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.holophone-shell input:focus,
+.holophone-shell select:focus,
+.holophone-shell textarea:focus {
+  border-color: var(--holophone-hover) !important;
+  outline: 1px solid var(--holophone-hover) !important;
+}
+
+.holophone-shell input::placeholder,
+.holophone-shell textarea::placeholder {
+  color: var(--holophone-muted);
+  opacity: 0.82;
+}
+
+.holophone-shell select option,
+.holophone-shell select optgroup {
+  color: var(--holophone-text);
+  background: var(--holophone-bg);
+}
+
+.holophone-alias-from,
+.holophone-alias-to {
+  margin-top: 7px;
+}
+
+.holophone-message {
+  min-height: 125px !important;
+  resize: vertical;
+}
+
+.holophone-picker {
+  position: relative;
+}
+
+.holophone-pick-display {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 5px 7px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.54);
+  border: 1px solid var(--holophone-accent);
+  border-radius: 8px;
+}
+
+.holophone-pick-display:hover {
+  border-color: var(--holophone-hover);
+}
+
+.holophone-pick-placeholder {
+  color: var(--holophone-muted);
+}
+
+.holophone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px 3px 8px;
+  color: var(--holophone-text);
+  background: rgba(0, 255, 247, 0.09);
+  border: 1px solid var(--holophone-accent);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.holophone-chip-remove {
+  display: grid !important;
+  width: 20px !important;
+  min-width: 20px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  place-items: center;
+  color: var(--holophone-accent) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  font-size: 17px !important;
+  line-height: 20px !important;
+}
+
+.holophone-chip-remove:hover {
+  color: var(--holophone-hover) !important;
+  box-shadow: none !important;
+}
+
+.holophone-chip.unavailable {
+  border-style: dashed;
+  opacity: 0.72;
+}
+
+.holophone-pick-menu {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  display: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #080c0e;
+  border: 2px solid var(--holophone-accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.72);
+}
+
+.holophone-pick-menu.open {
+  display: block;
+}
+
+.holophone-pick-heading {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 9px;
+  color: #071011;
+  background: var(--holophone-accent);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.holophone-pick-item {
+  display: grid !important;
+  width: 100% !important;
+  min-height: 38px !important;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 5px 8px !important;
+  color: var(--holophone-text) !important;
+  text-align: left;
+  background: #0c1215 !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.holophone-pick-item:hover,
+.holophone-pick-item.selected {
+  color: var(--holophone-hover) !important;
+  background: #151d20 !important;
+}
+
+.holophone-pick-item.unavailable {
+  opacity: 0.68;
+}
+
+.holophone-pick-name {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.holophone-pick-name b,
+.holophone-pick-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holophone-pick-name small {
+  color: var(--holophone-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.holophone-pick-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.holophone-contact-action {
+  display: grid !important;
+  width: 25px !important;
+  min-width: 25px !important;
+  height: 25px !important;
+  min-height: 25px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  place-items: center;
+  color: var(--holophone-accent) !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid var(--holophone-accent) !important;
+  border-radius: 5px !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+}
+
+.holophone-contact-action:hover {
+  color: var(--holophone-hover) !important;
+  border-color: var(--holophone-hover) !important;
+}
+
+.holophone-pick-check {
+  width: 14px;
+  color: var(--holophone-hover);
+  text-align: center;
+}
+
+.holophone-pick-item img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border: 1px solid var(--holophone-accent);
+  border-radius: 50%;
+}
+
+.holophone-pick-empty {
+  padding: 12px;
+  color: var(--holophone-muted);
+  text-align: center;
+}
+
+.holophone-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.holophone-check {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  flex-direction: row;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--holophone-text);
+  background: rgba(0, 0, 0, 0.48);
+  border: 1px solid var(--holophone-accent);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.holophone-check input[type="checkbox"] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  accent-color: var(--holophone-accent);
+}
+
+.holophone-with-number input[type="number"] {
+  width: 70px;
+  min-width: 70px;
+  min-height: 26px;
+  text-align: right;
+}
+
+.holophone-disabled {
+  opacity: 0.62;
+}
+
+.holophone-emergency-panel {
+  background: linear-gradient(135deg, rgba(92, 0, 0, 0.28), var(--holophone-panel) 46%);
+}
+
+.holophone-emergency-mode {
+  margin-top: 10px;
+}
+
+.holophone-network-panel {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--holophone-accent) 12%, transparent), var(--holophone-panel) 48%);
+}
+
+.holophone-network-shell {
+  min-width: 0;
+}
+
+.holophone-contact-manager-shell {
+  min-width: 0;
+}
+
+.holophone-contact-manager-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(190px, 0.75fr);
+  gap: 10px;
+}
+
+.holophone-contact-manager-note {
+  margin-top: 7px;
+}
+
+.holophone-to-tools {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.holophone-to-tools .holophone-check {
+  flex: 1 1 240px;
+}
+
+.holophone-to-tools .holophone-btn {
+  flex: 1 1 190px;
+  min-height: 34px !important;
+  border-radius: 8px !important;
+}
+
+.holophone-broadcast-message {
+  min-height: 180px !important;
+  resize: vertical;
+}
+
+.holophone-service {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
+.holophone-service b {
+  color: var(--holophone-accent);
+}
+
+.holophone-btn,
+.holophone-chat-card button {
+  width: auto !important;
+  min-width: 118px;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 6px 12px !important;
+  color: var(--holophone-text) !important;
+  background: rgba(0, 0, 0, 0.48) !important;
+  border: 2px solid var(--holophone-accent) !important;
+  border-radius: 18px !important;
+  font-weight: 850;
+  box-shadow: none !important;
+}
+
+.holophone-btn:hover:not([disabled]),
+.holophone-btn:focus:not([disabled]),
+.holophone-chat-card button:hover:not([disabled]) {
+  color: var(--holophone-hover) !important;
+  border-color: var(--holophone-hover) !important;
+  box-shadow: 0 0 10px rgba(255, 221, 0, 0.24) !important;
+}
+
+.holophone-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.holophone-send {
+  width: 100% !important;
+  color: var(--holophone-bg) !important;
+  background: var(--holophone-accent) !important;
+  border-radius: 8px !important;
+  font-size: 15px;
+}
+
+.holophone-send:hover {
+  color: #000 !important;
+  background: var(--holophone-hover) !important;
+}
+
+.holophone-tip {
+  text-align: center;
+}
+
+.holophone-confirm {
+  color: inherit;
+}
+
+.holophone-chat-card {
+  --holophone-accent: #00fff7;
+  padding: 10px;
+  color: #eaffff;
+  background: #0b1013;
+  border: 2px solid var(--holophone-accent);
+  border-radius: 9px;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.38);
+}
+
+.holophone-chat-kicker {
+  color: #ffdd00;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.holophone-chat-title {
+  margin: 2px 0 8px;
+  color: var(--holophone-accent);
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.holophone-chat-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+}
+
+.holophone-chat-grid span {
+  color: #98ced0;
+}
+
+.holophone-chat-note {
+  margin-top: 8px;
+  padding-top: 7px;
+  color: #c6e7e8;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+}
+
+.holophone-chat-clock {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 6px;
+  color: #d4f7f7;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: monospace;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.holophone-chat-clock i {
+  color: var(--holophone-accent, #00fff7);
+}
+
+.holophone-chat-clock-source {
+  color: #ffdd00;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.holophone-chat-card button {
+  margin-top: 9px !important;
+}
+
+.holophone-network-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--holophone-accent) 8%, transparent), transparent 42%),
+    #0b1013;
+}
+
+.holophone-network-card::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 42px;
+  content: "";
+  pointer-events: none;
+  border-top: 8px solid var(--holophone-accent);
+  border-right: 8px solid var(--holophone-accent);
+  opacity: 0.65;
+}
+
+.holophone-network-scanline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 3px,
+    rgba(255, 255, 255, 0.025) 4px
+  );
+}
+
+.holophone-network-card .holophone-chat-kicker,
+.holophone-network-card .holophone-chat-title,
+.holophone-network-body,
+.holophone-network-footer {
+  position: relative;
+}
+
+.holophone-message-heading {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  margin: 5px 0 8px;
+}
+
+.holophone-message-avatar {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
+  object-fit: cover;
+  background: #050708;
+  border: 2px solid var(--holophone-accent);
+  border-radius: 5px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--holophone-accent) 28%, transparent);
+}
+
+.holophone-message-heading-text {
+  min-width: 0;
+}
+
+.holophone-message-heading .holophone-chat-title {
+  margin: 0 0 3px;
+  overflow-wrap: anywhere;
+}
+
+.holophone-message-route {
+  color: #d4f7f7;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.holophone-message-route span {
+  color: #ffdd00;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.holophone-message-tags {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+
+.holophone-message-tag {
+  padding: 2px 5px;
+  color: #d4f7f7;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid color-mix(in srgb, var(--holophone-accent) 68%, transparent);
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.holophone-message-tag.is-private {
+  color: #ffdd00;
+  border-color: #ffdd00;
+}
+
+.holophone-message-tag.is-transaction {
+  color: #0b1013;
+  background: var(--holophone-accent);
+  border-color: var(--holophone-accent);
+}
+
+.holophone-message-body {
+  min-height: 38px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.holophone-network-body {
+  padding: 9px;
+  color: #eaffff;
+  background: rgba(0, 0, 0, 0.36);
+  border-left: 3px solid var(--holophone-accent);
+  line-height: 1.45;
+}
+
+.holophone-network-footer {
+  margin-top: 8px;
+  color: #98ced0;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .holophone-shell {
+    min-width: 0;
+  }
+
+  .holophone-grid-2,
+  .holophone-emergency-grid,
+  .holophone-contact-manager-grid {
+    grid-template-columns: 1fr;
+  }
+}

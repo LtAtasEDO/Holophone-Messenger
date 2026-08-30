@@ -1,0 +1,105 @@
+# Holophone/Agent Messenger™
+
+A Foundry VTT 12 module for Cyberpunk RED v0.92.1+ that converts the Holophone/Agent Messenger macros into one player- and GM-aware interface.
+
+## Features
+
+- Preserves From/To aliases, multi-recipient messages, emote formatting, public chat, and role-aware whispers.
+- Keeps player-to-player eb transfers and GM Charge/Credit controls using the Cyberpunk RED actor ledger, with sender/recipient aliases recorded in each ledger description.
+- Keeps the GM directory separated into **Player Characters** and **NPCs** while excluding all Cyberpunk RED `container` actors, including shops, markets, and loot lockers.
+- Gives each player a private directory containing only Player Characters, recent NPC/alias contacts, and contacts they chose to save.
+- Lets the GM add an NPC contact to one player or all current players without exposing the rest of the NPC directory.
+- Lets the GM set Corrupted message strength from 0% to 100%.
+- Keeps the world-wide 2045 Mode toggle: Agent/red in 2045 and Holophone/cyan in 2077.
+- Adds public emergency dispatch cards and response rolls.
+- Gives the GM a custom public-network composer: **CitiNet** in 2077 mode and **Ziggurat** in 2045 mode, each with its own styled chat card.
+- Uses the included unknown-contact artwork for alias-only contacts and messages instead of Foundry's blank white mook silhouette.
+- Renders ordinary messages as dark, high-contrast direct-message cards in the same visual family as CitiNet/Ziggurat feeds: cyan Holophone cards in 2077 and red Agent cards in 2045.
+- Adds a timestamp to every Holophone-generated chat entry. When Simple Calendar is installed and active, the stamp uses its configured in-world date/time; otherwise it uses real local time.
+
+## Chat timestamps
+
+Holophone checks for the active `foundryvtt-simple-calendar` module whenever it creates a chat entry. If available, the module reads Simple Calendar's own formatted current date and time and marks the entry **WORLD TIME**. This applies to ordinary messages, one-time transaction cards, emergency dispatches, public CitiNet/Ziggurat broadcasts, and unavailable-number notices.
+
+If Simple Calendar is absent, disabled, or its API cannot return a formatted time, Holophone continues normally and marks the entry with **LOCAL TIME** using the sender's real clock. Simple Calendar remains optional and requires no Holophone setting.
+
+## Public network broadcasts
+
+The GM-only **Public Network** panel opens a compact composer with an optional headline and a custom message. Posting creates a public styled chat card using the active era:
+
+- **2077 Mode:** CitiNet / Night City Network.
+- **2045 Mode:** Ziggurat / Datapool.
+
+Broadcast text is safely escaped before display, preserves line breaks, and never requires a From or To actor.
+The CitiNet and Ziggurat network identities are reserved system broadcasters: they never appear in player Recent Contacts or Saved Contacts, even if their names are used as ordinary sender aliases.
+
+## Emergency calls
+
+### R.E.O. Meatwagon
+
+R.E.O. can be called with or without a membership.
+
+- The module reads the caller's active, carried Gear Items for one food lifestyle and one housing lifestyle.
+- If food + housing is **above 800eb/month**, the Holophone call is free.
+- Otherwise, **5eb** is deducted from the caller's Cyberpunk RED ledger as `R.E.O. Meatwagon Holophone Call Fee`.
+- An active R.E.O. membership uses a `1d6+2` response roll. An uncovered/Cash Call request uses `1d6+3`.
+- Membership, Cash Call, transport, and hospital fees are not deducted by this module; they remain governed by the R.E.O. policy Item and the GM.
+
+Lifestyle detection follows Diner™ Manager when it is installed. A matching built-in detector is used otherwise. The old actor-level lifestyle block is not used because it may be stale.
+
+The GM can enable **Skip lifestyle check** in the Emergency Services panel. While enabled, the module does not inspect food or housing and R.E.O. uses its flat **5eb** call fee. Trauma Team membership gating is unchanged. The choice is saved for the world until the GM turns it off.
+
+### Trauma Team
+
+- The call button only activates when the caller owns an active carried Gear Item whose name contains both `Trauma Team` and `Membership`.
+- The tier is read generically from the Item name, so Silver, Executive, and future tiers work without a code update.
+- When several membership Items are active, the highest monthly/market value is used.
+- A successful call posts the tier and rolls the standard `1d6` response time.
+
+## Installation
+
+1. Extract the ZIP into Foundry's `Data/modules` folder.
+2. Confirm the resulting path is `Data/modules/holophone/module.json`.
+3. Enable **Holophone/Agent Messenger™** in the world.
+4. Reload the world once.
+
+The active GM receives a **Holophone/Agent Messenger™** launcher Macro automatically.
+Its icon uses `systems/cyberpunk-red-core/icons/compendium/gear/agent.svg`. Existing official launcher Macros are updated in place when v1.7.1 starts, preserving their command and hotbar assignment.
+
+Manual launcher command:
+
+```js
+return game.holophone.open(typeof args === "undefined" ? null : args);
+```
+
+The API also provides:
+
+```js
+game.holophone.open();
+game.holophone.callREO(actor);
+game.holophone.callTrauma(actor);
+game.holophone.openNetworkComposer();
+game.holophone.postNetworkBroadcast({ headline: "Headline", message: "Message" });
+game.holophone.openContactManager();
+game.holophone.grantPlayerContact({ actor, alias: "Wakako", userIds: [userId] });
+game.holophone.inspectLifestyle(actor);
+game.holophone.findTraumaMembership(actor);
+game.holophone.getChatClock();
+```
+
+## Notes
+
+- A real owned From actor is required for transfers and emergency calls. An alias-only sender can still send ordinary messages.
+- Entering a From alias uses the module's unknown-contact portrait in the direct-message card, while a sender using their real actor name keeps their available actor portrait. Existing white mystery-man contact icons are upgraded automatically.
+- A player sees only owned Player Characters in **From** and only Player Characters plus their own saved, GM-added, and recent NPC aliases in **To**. The full NPC directory remains GM-only.
+- The GM-only **Manage Contacts** control can add an NPC to one player user or **All Players**. Assigned entries appear under **GM Contacts**, above **Recent Contacts**, in the player dropdown and quick search.
+- GM-added contacts belong only to the targeted player address books. Players can promote them to **Saved Contacts** or remove them; no other NPC names are exposed.
+- When an NPC or alias messages a Player Character, that alias is added only to the owning player's **Recent Contacts**. Players can save recent contacts to their address book or remove recent/saved entries themselves.
+- `CitiNet`, `CitiNet Broadcast`, `Ziggurat`, and `Ziggurat Broadcast` are never stored or shown as player contacts. Matching legacy entries are removed automatically after upgrading.
+- Alias-only GM senders remain replyable through the GM. If an actor-backed contact is later deleted, attempting to message it posts a private CitiNet/Ziggurat `This number is temporarily unavailable....` status card.
+- Wealth ledger descriptions identify the in-character alias: for example, `Holophone Credit (from Wakako)`, `Agent Charge (to Fixer)`, and `Holophone Transfer (received from V)`.
+- Cyberpunk RED actors whose type is `container` are never offered as contacts, selected by saved contact preferences, or included by **Add all Player Characters on this Scene**.
+- Players retain **Whisper to GM**, which whispers the message itself to all GMs.
+- GMs receive **Whisper to Player** instead. It delivers the message only to the owners of Player Character actors selected in **To**, while keeping the sending GMs in the whisper. Selecting only NPC recipients produces a warning before the message or any ledger action is processed.
+- Private GM-to-player NPC or alias messages still add that sender to the receiving players' recent contacts.
+- Transfer deposits sent to another player are delivered as a one-time private Apply button. Applied transaction receipts are recorded on the recipient actor to prevent repeat clicks.

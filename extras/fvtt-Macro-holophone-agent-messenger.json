@@ -1,0 +1,7 @@
+{
+  "name": "Holophone/Agent Messenger™",
+  "type": "script",
+  "scope": "global",
+  "img": "systems/cyberpunk-red-core/icons/compendium/gear/agent.svg",
+  "command": "return game.holophone.open(typeof args === \"undefined\" ? null : args);"
+}

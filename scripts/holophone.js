@@ -1,0 +1,1988 @@
+const MODULE_ID = "holophone";
+const MODULE_VERSION = "1.7.1";
+const PREF_FLAG = "icMessengerPrefs.v2";
+const RECEIPT_FLAG = "transactionReceipts";
+const PLAYER_CONTACT_FLAG = "playerContactBook.v1";
+const SIMPLE_CALENDAR_MODULE_ID = "foundryvtt-simple-calendar";
+const MAX_PLAYER_CONTACTS = 100;
+const ERA_2045 = "#e64539";
+const ERA_2077 = "#00fff7";
+const HOVER = "#ffdd00";
+const ALIAS_PORTRAIT = "modules/holophone/assets/unknown-contact.webp";
+const LAUNCHER_ICON = "systems/cyberpunk-red-core/icons/compendium/gear/agent.svg";
+const REO_CALL_FEE = 5;
+const REO_FREE_THRESHOLD = 800;
+const RESERVED_NETWORK_CONTACT_ALIASES = new Set([
+  "citinet",
+  "citinet broadcast",
+  "ziggurat",
+  "ziggurat broadcast"
+]);
+
+const FOOD_TIERS = [
+  { id: "none", label: "No Paid Food Lifestyle", rank: 0, monthly: 0, aliases: [] },
+  { id: "kibble", label: "Kibble", rank: 1, monthly: 100, aliases: ["kibble"] },
+  { id: "generic-prepak", label: "Generic Prepak", rank: 2, monthly: 300, aliases: ["generic prepak", "generic pre-pack", "generic prepack"] },
+  { id: "good-prepak", label: "Good Prepak", rank: 3, monthly: 600, aliases: ["good prepak", "good pre-pack", "good prepack"] },
+  { id: "fresh-food", label: "Fresh Food", rank: 4, monthly: 1500, aliases: ["fresh food"] }
+];
+
+const HOUSING_PATTERNS = [
+  "living on the street",
+  "living in a vehicle",
+  "cube hotel",
+  "cargo container",
+  "studio apartment",
+  "two-bedroom apartment",
+  "two bedroom apartment",
+  "upscale conapt",
+  "corporate conapt",
+  "beaverville house",
+  "beaverville mcmansion",
+  "luxury penthouse"
+];
+
+let simpleCalendarClockWarningShown = false;
+
+function duplicate(value) {
+  return foundry.utils.deepClone(value);
+}
+
+function makeId(length = 16) {
+  return foundry.utils.randomID(length);
+}
+
+function esc(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function normalize(value = "") {
+  return String(value)
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/[™®©]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isReservedNetworkContactAlias(value = "") {
+  return RESERVED_NETWORK_CONTACT_ALIASES.has(normalize(value));
+}
+
+function contactPortrait(value = "") {
+  const portrait = String(value ?? "").trim();
+  if (!portrait || /(^|\/)icons\/svg\/mystery-man\.svg(?:$|[?#])/i.test(portrait)) return ALIAS_PORTRAIT;
+  return portrait;
+}
+
+function aliasPortrait(actor = null, alias = "", forceAlias = false) {
+  if (forceAlias || !actor || normalize(alias) !== normalize(actor.name)) return ALIAS_PORTRAIT;
+  return contactPortrait(actor.img);
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, Number(value) || 0));
+}
+
+function currentAccent() {
+  return game.settings.get(MODULE_ID, "era2045") ? ERA_2045 : ERA_2077;
+}
+
+function currentTerm() {
+  return game.settings.get(MODULE_ID, "era2045") ? "Agent" : "Holophone";
+}
+
+function skipLifestyleChecks() {
+  return game.settings.get(MODULE_ID, "skipLifestyleChecks");
+}
+
+function networkIdentity(era2045 = game.settings.get(MODULE_ID, "era2045")) {
+  return era2045
+    ? {
+      era: 2045,
+      name: "Ziggurat",
+      kicker: "ZIGGURAT // DATAPOOL BULLETIN",
+      defaultHeadline: "Ziggurat Newsfeed",
+      footer: "DATAPOOL PUBLIC FEED // NIGHT CITY"
+    }
+    : {
+      era: 2077,
+      name: "CitiNet",
+      kicker: "CITINET // NIGHT CITY NETWORK",
+      defaultHeadline: "CitiNet Bulletin",
+      footer: "PUBLIC DATA FEED // NIGHT CITY"
+    };
+}
+
+function simpleCalendarIsActive() {
+  return Boolean(
+    game.modules.get(SIMPLE_CALENDAR_MODULE_ID)?.active
+    && globalThis.SimpleCalendar?.api
+  );
+}
+
+function clockDisplayLabel(value) {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  return [value.date, value.time]
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean)
+    .join(" • ");
+}
+
+function realTimeClockLabel(timestamp = Date.now()) {
+  try {
+    return new Intl.DateTimeFormat(game.i18n?.lang || undefined, {
+      dateStyle: "medium",
+      timeStyle: "medium"
+    }).format(new Date(timestamp));
+  } catch (_error) {
+    return new Date(timestamp).toLocaleString();
+  }
+}
+
+function currentChatClock() {
+  const realTime = Date.now();
+
+  if (simpleCalendarIsActive()) {
+    try {
+      const api = globalThis.SimpleCalendar.api;
+      let label = clockDisplayLabel(api.currentDateTimeDisplay?.());
+
+      if (!label) {
+        const current = api.currentDateTime?.() ?? api.getCurrentDate?.();
+        if (current) label = clockDisplayLabel(api.formatDateTime?.(current));
+      }
+
+      if (label) {
+        const rawTimestamp = Number(api.timestamp?.());
+        return {
+          source: "simple-calendar",
+          sourceLabel: "WORLD TIME",
+          label,
+          realTime,
+          calendarTimestamp: Number.isFinite(rawTimestamp) ? rawTimestamp : null
+        };
+      }
+    } catch (error) {
+      if (!simpleCalendarClockWarningShown) {
+        console.warn(`${MODULE_ID} | Simple Calendar clock lookup failed; using local real time.`, error);
+        simpleCalendarClockWarningShown = true;
+      }
+    }
+  }
+
+  return {
+    source: "real-time",
+    sourceLabel: "LOCAL TIME",
+    label: realTimeClockLabel(realTime),
+    realTime,
+    calendarTimestamp: null
+  };
+}
+
+function chatClockHTML(clock = currentChatClock()) {
+  return `
+    <div class="holophone-chat-clock" data-holophone-clock="${esc(clock.source)}">
+      <i class="far fa-clock"></i>
+      <span class="holophone-chat-clock-source">${esc(clock.sourceLabel)}</span>
+      <span>${esc(clock.label)}</span>
+    </div>`;
+}
+
+function chatClockFlag(clock) {
+  return {
+    source: clock.source,
+    label: clock.label,
+    realTime: clock.realTime,
+    calendarTimestamp: clock.calendarTimestamp
+  };
+}
+
+function isContactActor(actor) {
+  return Boolean(actor && normalize(actor.type) !== "container");
+}
+
+function allActors() {
+  return [...game.actors.contents]
+    .filter(isContactActor)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function actorById(id) {
+  const actor = game.actors.get(id) ?? null;
+  return isContactActor(actor) ? actor : null;
+}
+
+function actorHasPlayerOwner(actor) {
+  return Boolean(actor?.hasPlayerOwner);
+}
+
+function playerCharacterActors() {
+  return allActors().filter(actorHasPlayerOwner);
+}
+
+function ownedPlayerCharacterActors() {
+  return playerCharacterActors().filter((actor) => actor.isOwner);
+}
+
+function playerContactBook(user = game.user) {
+  const raw = duplicate(user?.getFlag?.(MODULE_ID, PLAYER_CONTACT_FLAG) ?? {});
+  const source = Array.isArray(raw) ? raw : Array.isArray(raw.contacts) ? raw.contacts : [];
+  const contacts = source.map((entry) => {
+    const alias = String(entry?.alias ?? entry?.name ?? "").trim().slice(0, 120);
+    if (!alias) return null;
+    const route = entry?.route === "gm" || (!entry?.actorId && !entry?.actorUuid) ? "gm" : "actor";
+    return {
+      id: String(entry?.id || makeId(16)),
+      alias,
+      route,
+      actorId: route === "actor" ? String(entry?.actorId ?? "") : "",
+      actorUuid: route === "actor" ? String(entry?.actorUuid ?? "") : "",
+      img: contactPortrait(entry?.img),
+      saved: Boolean(entry?.saved),
+      source: entry?.source === "gm" ? "gm" : "recent",
+      firstSeenAt: Math.max(0, Number(entry?.firstSeenAt) || Date.now()),
+      lastSeenAt: Math.max(0, Number(entry?.lastSeenAt) || Date.now())
+    };
+  }).filter((entry) => entry && !isReservedNetworkContactAlias(entry.alias));
+  return { version: 2, contacts };
+}
+
+async function persistPlayerContactBook(user, book) {
+  if (!user) return;
+  const contacts = [...(book?.contacts ?? [])]
+    .filter((entry) => entry?.id
+      && String(entry.alias ?? "").trim()
+      && !isReservedNetworkContactAlias(entry.alias))
+    .sort((a, b) => Number(b.saved) - Number(a.saved)
+      || Number(b.source === "gm") - Number(a.source === "gm")
+      || b.lastSeenAt - a.lastSeenAt);
+  const saved = contacts.filter((entry) => entry.saved);
+  const gmContacts = contacts.filter((entry) => !entry.saved && entry.source === "gm");
+  const recent = contacts.filter((entry) => !entry.saved && entry.source !== "gm").slice(0, MAX_PLAYER_CONTACTS);
+  const persisted = [...saved, ...gmContacts, ...recent];
+  if (book) book.contacts = persisted;
+  await user.setFlag(MODULE_ID, PLAYER_CONTACT_FLAG, { version: 2, contacts: persisted });
+}
+
+function playerOwnersForActors(actors = []) {
+  const ownerLevel = (CONST.DOCUMENT_OWNERSHIP_LEVELS ?? CONST.DOCUMENT_PERMISSION_LEVELS).OWNER;
+  return game.users.players.filter((user) => actors.some((actor) => actor.testUserPermission?.(user, ownerLevel)));
+}
+
+function resolveMessengerWhisperIds({ recipients = [], relayContacts = [], whisper = false, senderIsGM = game.user.isGM } = {}) {
+  const gmIds = game.users.contents.filter((user) => user.isGM).map((user) => user.id);
+  if (relayContacts.length) return [...new Set([game.user.id, ...gmIds])];
+  if (!whisper) return [];
+  if (!senderIsGM) return gmIds;
+  const playerIds = playerOwnersForActors(recipients.filter(actorHasPlayerOwner)).map((user) => user.id);
+  return [...new Set([...gmIds, ...playerIds])];
+}
+
+async function rememberIncomingContact({ actor = null, alias = "", recipients = [] } = {}) {
+  if (!game.user.isGM || actorHasPlayerOwner(actor)) return;
+  const contactAlias = String(alias || actor?.name || "").trim().slice(0, 120);
+  if (!contactAlias || isReservedNetworkContactAlias(contactAlias)) return;
+
+  const route = actor ? "actor" : "gm";
+  const actorId = route === "actor" ? String(actor.id ?? "") : "";
+  const actorUuid = route === "actor" ? String(actor.uuid ?? `Actor.${actorId}`) : "";
+  const identityKey = `${route}|${actorUuid}|${normalize(contactAlias)}`;
+  const contactImg = aliasPortrait(actor, contactAlias);
+  const now = Date.now();
+
+  for (const user of playerOwnersForActors(recipients.filter(actorHasPlayerOwner))) {
+    const book = playerContactBook(user);
+    let contact = book.contacts.find((entry) => `${entry.route}|${entry.actorUuid}|${normalize(entry.alias)}` === identityKey);
+    if (!contact) {
+      contact = {
+        id: makeId(16),
+        alias: contactAlias,
+        route,
+        actorId,
+        actorUuid,
+        img: contactImg,
+        saved: false,
+        source: "recent",
+        firstSeenAt: now,
+        lastSeenAt: now
+      };
+      book.contacts.push(contact);
+    } else {
+      contact.alias = contactAlias;
+      contact.actorId = actorId;
+      contact.actorUuid = actorUuid;
+      contact.img = contactImg;
+      contact.lastSeenAt = now;
+    }
+    await persistPlayerContactBook(user, book);
+  }
+}
+
+function nonGMPlayerUsers() {
+  return [...game.users.contents]
+    .filter((user) => !user.isGM)
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
+}
+
+async function grantPlayerContact({ actor = null, alias = "", userIds = [] } = {}) {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can add contacts to player address books.");
+  if (!isContactActor(actor) || actorHasPlayerOwner(actor)) {
+    return ui.notifications.warn("Choose a real NPC contact. Player Characters and containers are excluded.");
+  }
+
+  const contactAlias = String(alias || actor.name || "").trim().slice(0, 120);
+  if (!contactAlias) return ui.notifications.warn("Enter a contact name or alias.");
+  if (isReservedNetworkContactAlias(contactAlias)) {
+    return ui.notifications.warn("CitiNet and Ziggurat network identities cannot be added as contacts.");
+  }
+
+  const requested = new Set((Array.isArray(userIds) ? userIds : [userIds]).map(String).filter(Boolean));
+  const targetUsers = nonGMPlayerUsers().filter((user) => requested.has(user.id));
+  if (!targetUsers.length) return ui.notifications.warn("Choose one player or All Players.");
+
+  const actorId = String(actor.id ?? "");
+  const actorUuid = String(actor.uuid ?? `Actor.${actorId}`);
+  const identityKey = `actor|${actorUuid}|${normalize(contactAlias)}`;
+  const contactImg = aliasPortrait(actor, contactAlias);
+  const now = Date.now();
+
+  for (const user of targetUsers) {
+    const book = playerContactBook(user);
+    let contact = book.contacts.find((entry) => `${entry.route}|${entry.actorUuid}|${normalize(entry.alias)}` === identityKey);
+    if (!contact) {
+      contact = {
+        id: makeId(16),
+        alias: contactAlias,
+        route: "actor",
+        actorId,
+        actorUuid,
+        img: contactImg,
+        saved: false,
+        source: "gm",
+        firstSeenAt: now,
+        lastSeenAt: now
+      };
+      book.contacts.push(contact);
+    } else {
+      contact.alias = contactAlias;
+      contact.actorId = actorId;
+      contact.actorUuid = actorUuid;
+      contact.img = contactImg;
+      contact.source = "gm";
+      contact.lastSeenAt = now;
+    }
+    await persistPlayerContactBook(user, book);
+  }
+
+  return { actor, alias: contactAlias, users: targetUsers };
+}
+
+async function purgeReservedNetworkContacts() {
+  const users = game.user.isGM ? game.users.players : [game.user];
+  for (const user of users) {
+    const raw = duplicate(user?.getFlag?.(MODULE_ID, PLAYER_CONTACT_FLAG) ?? {});
+    const source = Array.isArray(raw) ? raw : Array.isArray(raw.contacts) ? raw.contacts : [];
+    const hasReservedContact = source.some((entry) => isReservedNetworkContactAlias(entry?.alias ?? entry?.name));
+    if (hasReservedContact) await persistPlayerContactBook(user, playerContactBook(user));
+  }
+}
+
+async function upgradeLegacyContactPortraits() {
+  const users = game.user.isGM ? game.users.players : [game.user];
+  for (const user of users) {
+    const raw = duplicate(user?.getFlag?.(MODULE_ID, PLAYER_CONTACT_FLAG) ?? {});
+    const source = Array.isArray(raw) ? raw : Array.isArray(raw.contacts) ? raw.contacts : [];
+    const hasLegacyPortrait = source.some((entry) => contactPortrait(entry?.img) !== String(entry?.img ?? ""));
+    if (hasLegacyPortrait) await persistPlayerContactBook(user, playerContactBook(user));
+  }
+}
+
+function canUseActor(actor) {
+  return Boolean(isContactActor(actor) && (game.user.isGM || actor.isOwner));
+}
+
+function actorHasWealth(actor) {
+  return Number.isFinite(Number(actor?.system?.wealth?.value));
+}
+
+function parseMonthlyAmount(name = "") {
+  const match = String(name).replaceAll(",", "").match(/(\d+)\s*eb\s*\/\s*month/i);
+  return match ? Math.max(0, Number(match[1]) || 0) : null;
+}
+
+function getItemMarketValue(item) {
+  const value = item?.system?.price?.market ?? item?.system?.price ?? 0;
+  return Math.max(0, Number(value) || 0);
+}
+
+function getItemAmount(item) {
+  const value = item?.system?.amount;
+  if (value === undefined || value === null || value === "") return 1;
+  return Math.max(0, Number(value) || 0);
+}
+
+function isActiveCarriedGear(item) {
+  if (normalize(item?.type) !== "gear" || getItemAmount(item) <= 0) return false;
+  const state = normalize(item?.system?.equipped ?? "");
+  return !state || state === "equipped" || state === "carried";
+}
+
+function itemFoodTier(item) {
+  const name = normalize(item?.name);
+  let best = FOOD_TIERS[0];
+  for (const tier of FOOD_TIERS) {
+    if (tier.rank <= best.rank) continue;
+    if (tier.aliases.some((alias) => name.includes(normalize(alias)))) best = tier;
+  }
+  return best;
+}
+
+function inspectLifestyleFallback(actor) {
+  const foodMatches = [];
+  const housingMatches = [];
+
+  for (const item of actor?.items ?? []) {
+    if (!isActiveCarriedGear(item)) continue;
+    const name = normalize(item.name);
+    const parsed = parseMonthlyAmount(item.name);
+    const tier = itemFoodTier(item);
+
+    if (tier.rank > 0) {
+      const market = getItemMarketValue(item);
+      foodMatches.push({ item, tier, amount: parsed ?? (market > 0 ? market : tier.monthly) });
+    }
+
+    if (HOUSING_PATTERNS.some((pattern) => name.includes(normalize(pattern)))) {
+      housingMatches.push({ item, amount: parsed ?? getItemMarketValue(item) });
+    }
+  }
+
+  foodMatches.sort((a, b) => b.tier.rank - a.tier.rank || b.amount - a.amount);
+  housingMatches.sort((a, b) => b.amount - a.amount);
+
+  const food = foodMatches[0] ?? null;
+  const housing = housingMatches[0] ?? null;
+  const foodMonthly = Math.max(0, Number(food?.amount ?? 0) || 0);
+  const housingMonthly = Math.max(0, Number(housing?.amount ?? 0) || 0);
+
+  return {
+    foodTier: food?.tier ?? FOOD_TIERS[0],
+    foodSource: food?.item?.name ?? "No paid food plan detected",
+    foodMonthly,
+    housingName: housing?.item?.name ?? "None detected",
+    housingMonthly,
+    totalMonthly: foodMonthly + housingMonthly,
+    source: "Holophone"
+  };
+}
+
+function inspectLifestyle(actor) {
+  try {
+    const dinerResult = game.dinerManager?.inspectLifestyle?.(actor);
+    if (dinerResult && Number.isFinite(Number(dinerResult.totalMonthly))) {
+      const foodMonthly = Math.max(0, Number(dinerResult.foodTier?.monthly ?? 0) || 0);
+      return {
+        ...dinerResult,
+        foodMonthly,
+        housingMonthly: Math.max(0, Number(dinerResult.housingMonthly ?? 0) || 0),
+        totalMonthly: Math.max(0, Number(dinerResult.totalMonthly) || 0),
+        source: "Diner Manager"
+      };
+    }
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Diner lifestyle lookup failed; using local detection.`, error);
+  }
+  return inspectLifestyleFallback(actor);
+}
+
+function membershipCandidates(actor, service) {
+  const expected = service === "trauma" ? ["trauma team", "membership"] : ["reo meatwagon", "membership"];
+  return [...(actor?.items ?? [])]
+    .filter((item) => {
+      if (!isActiveCarriedGear(item)) return false;
+      const name = normalize(item.name);
+      return expected.every((part) => name.includes(part));
+    })
+    .sort((a, b) => {
+      const monthlyA = parseMonthlyAmount(a.name) ?? getItemMarketValue(a);
+      const monthlyB = parseMonthlyAmount(b.name) ?? getItemMarketValue(b);
+      return monthlyB - monthlyA || a.name.localeCompare(b.name);
+    });
+}
+
+function membershipTier(item, service) {
+  if (!item) return "None";
+  const raw = String(item.name).replace(/^_+/, "").trim();
+  const colonMatch = raw.match(/membership\s*:\s*([^\-–—]+?)(?:\s*[\-–—]|$)/i);
+  if (colonMatch?.[1]?.trim()) return colonMatch[1].trim();
+
+  const serviceName = service === "trauma" ? "Trauma Team" : "R.E.O. Meatwagon";
+  const escapedService = serviceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace("R\\.E\\.O\\.", "R\\.?E\\.?O\\.?");
+  const loose = raw.match(new RegExp(`${escapedService}\\s+(.+?)\\s+membership`, "i"));
+  return loose?.[1]?.trim() || raw;
+}
+
+function findMembership(actor, service) {
+  const item = membershipCandidates(actor, service)[0] ?? null;
+  return item ? {
+    item,
+    tier: membershipTier(item, service),
+    monthly: parseMonthlyAmount(item.name) ?? getItemMarketValue(item)
+  } : null;
+}
+
+function garble(text, ratio = 0.5) {
+  const junk = "*%^?!#.,";
+  return [...String(text)].map((character) => {
+    if (/\s/.test(character) || Math.random() >= ratio) return character;
+    return junk[Math.floor(Math.random() * junk.length)];
+  }).join("");
+}
+
+async function adjustWealthRaw(actor, delta, reason = "Messenger Transaction", receiptId = null) {
+  if (!actorHasWealth(actor)) throw new Error(`${actor?.name ?? "Actor"} does not have a Cyberpunk RED ledger.`);
+
+  const wealth = duplicate(actor.system.wealth ?? {});
+  const before = Number(wealth.value ?? 0) || 0;
+  const change = Math.trunc(Number(delta) || 0);
+  wealth.value = before + change;
+  wealth.transactions ??= [];
+  wealth.transactions.push([
+    `${change >= 0 ? "Increased" : "Decreased"} by ${Math.abs(change)} to ${wealth.value}`,
+    reason
+  ]);
+
+  const update = { "system.wealth": wealth };
+  if (receiptId) {
+    const receipts = duplicate(actor.getFlag(MODULE_ID, RECEIPT_FLAG) ?? {});
+    if (receipts[receiptId]) return false;
+    receipts[receiptId] = Date.now();
+    const recent = Object.entries(receipts).sort((a, b) => b[1] - a[1]).slice(0, 250);
+    update[`flags.${MODULE_ID}.${RECEIPT_FLAG}`] = Object.fromEntries(recent);
+  }
+
+  await actor.update(update);
+  return true;
+}
+
+async function createDepositRequest(actor, delta, reason) {
+  const ownerLevel = (CONST.DOCUMENT_OWNERSHIP_LEVELS ?? CONST.DOCUMENT_PERMISSION_LEVELS).OWNER;
+  const owners = game.users.players.filter((user) => actor.testUserPermission?.(user, ownerLevel));
+  if (!owners.length) throw new Error(`No player owner exists for ${actor.name}; the transaction could not be delivered.`);
+
+  const receiptId = makeId(24);
+  const direction = delta >= 0 ? "Credit" : "Debit";
+  const clock = currentChatClock();
+  const content = `
+    <div class="holophone-chat-card" style="--holophone-accent:${currentAccent()}">
+      <div class="holophone-chat-title">Incoming ${esc(currentTerm())} Transaction</div>
+      <div><b>${esc(reason)}</b></div>
+      <div><b>${direction}:</b> ${Math.abs(Math.trunc(delta))}eb</div>
+      <button type="button" class="holophone-deposit"><i class="fas fa-coins"></i> Apply to ${esc(actor.name)}</button>
+      ${chatClockHTML(clock)}
+    </div>`;
+
+  await ChatMessage.create({
+    whisper: owners.map((user) => user.id),
+    content,
+    speaker: ChatMessage.getSpeaker({ alias: currentTerm() }),
+    flags: {
+      [MODULE_ID]: {
+        deposit: { receiptId, actorUuid: actor.uuid, delta: Math.trunc(delta), reason },
+        clock: chatClockFlag(clock)
+      }
+    }
+  });
+}
+
+async function adjustWealth(actor, delta, reason = "Messenger Transaction") {
+  if (game.user.isGM || actor.isOwner) return adjustWealthRaw(actor, delta, reason);
+  return createDepositRequest(actor, delta, reason);
+}
+
+function bindDepositHandler() {
+  if (game._holophoneDepositVersion === MODULE_VERSION) return;
+
+  Hooks.on("renderChatMessage", (message, html) => {
+    const root = html?.[0] ?? html;
+    const button = root?.querySelector?.(".holophone-deposit");
+    if (!button || button.dataset.holophoneBound === "1") return;
+    button.dataset.holophoneBound = "1";
+
+    button.addEventListener("click", async () => {
+      const deposit = message.getFlag(MODULE_ID, "deposit");
+      if (!deposit?.actorUuid || !deposit?.receiptId) return ui.notifications.error("This transaction is missing its ledger data.");
+
+      const actor = await fromUuid(deposit.actorUuid);
+      if (!actor?.isOwner) return ui.notifications.warn("You must own this actor to apply the transaction.");
+      if (actor.getFlag(MODULE_ID, RECEIPT_FLAG)?.[deposit.receiptId]) {
+        button.disabled = true;
+        button.textContent = "Already Applied";
+        return ui.notifications.info("This transaction was already applied.");
+      }
+
+      button.disabled = true;
+      try {
+        const applied = await adjustWealthRaw(actor, deposit.delta, deposit.reason, deposit.receiptId);
+        button.textContent = applied ? "Applied" : "Already Applied";
+        ui.notifications.info(applied ? "Transaction applied." : "This transaction was already applied.");
+      } catch (error) {
+        console.error(`${MODULE_ID} | Deposit failed`, error);
+        button.disabled = false;
+        ui.notifications.error(error.message ?? "The transaction could not be applied.");
+      }
+    });
+  });
+
+  game._holophoneDepositVersion = MODULE_VERSION;
+}
+
+function emergencySpeaker(actor) {
+  const tokenDoc = actor?.getActiveTokens?.()[0]?.document ?? null;
+  return ChatMessage.getSpeaker({
+    scene: canvas.scene,
+    actor,
+    token: tokenDoc ?? undefined,
+    alias: actor?.name ?? currentTerm()
+  });
+}
+
+function emergencyCard({ service, actor, coverage, eta, formula, feeText, details = "", clock = currentChatClock() }) {
+  const location = canvas.scene?.name ?? "Unknown location";
+  return `
+    <div class="holophone-chat-card holophone-emergency-card" style="--holophone-accent:${currentAccent()}">
+      <div class="holophone-chat-kicker">EMERGENCY DISPATCH REQUEST</div>
+      <div class="holophone-chat-title">${esc(service)}</div>
+      <div class="holophone-chat-grid">
+        <span>Caller</span><b>${esc(actor.name)}</b>
+        <span>Location</span><b>${esc(location)}</b>
+        <span>Coverage</span><b>${esc(coverage)}</b>
+        <span>Response</span><b>${eta} Rounds (${esc(formula)})</b>
+        ${feeText ? `<span>Call Fee</span><b>${esc(feeText)}</b>` : ""}
+      </div>
+      ${details ? `<div class="holophone-chat-note">${esc(details)}</div>` : ""}
+      ${chatClockHTML(clock)}
+    </div>`;
+}
+
+function networkCard({ headline = "", message = "", era2045 = game.settings.get(MODULE_ID, "era2045"), clock = currentChatClock() }) {
+  const identity = networkIdentity(era2045);
+  const safeMessage = esc(message).replace(/\r\n|\r|\n/g, "<br>");
+  return `
+    <div class="holophone-chat-card holophone-network-card" style="--holophone-accent:${era2045 ? ERA_2045 : ERA_2077}">
+      <div class="holophone-network-scanline"></div>
+      <div class="holophone-chat-kicker"><i class="fas fa-tower-broadcast"></i> ${esc(identity.kicker)}</div>
+      <div class="holophone-chat-title">${esc(String(headline).trim() || identity.defaultHeadline)}</div>
+      <div class="holophone-network-body">${safeMessage}</div>
+      ${chatClockHTML(clock)}
+      <div class="holophone-network-footer">${esc(identity.footer)}</div>
+    </div>`;
+}
+
+function messengerChannelLabel(mode = "public") {
+  if (mode === "players") return "WHISPER TO PLAYER";
+  if (mode === "gm") return "WHISPER TO GM";
+  if (mode === "gm-relay") return "GM RELAY";
+  return "PUBLIC CHANNEL";
+}
+
+function messengerCard({
+  senderAlias = "Unknown",
+  recipientText = "Unknown",
+  body = "",
+  status = "Message",
+  transaction = "",
+  whisperMode = "public",
+  portrait = ALIAS_PORTRAIT,
+  era2045 = game.settings.get(MODULE_ID, "era2045"),
+  clock = currentChatClock()
+} = {}) {
+  const term = era2045 ? "Agent" : "Holophone";
+  const accent = era2045 ? ERA_2045 : ERA_2077;
+  const footer = era2045 ? "AGENT DIRECT FEED // NIGHT CITY" : "HOLOPHONE DIRECT FEED // NIGHT CITY";
+  return `
+    <div class="holophone-chat-card holophone-network-card holophone-message-card" style="--holophone-accent:${accent}">
+      <div class="holophone-network-scanline"></div>
+      <div class="holophone-chat-kicker"><i class="fas fa-comment-dots"></i> ${esc(term.toUpperCase())} // DIRECT MESSAGE</div>
+      <div class="holophone-message-heading">
+        <img class="holophone-message-avatar" src="${esc(contactPortrait(portrait))}" alt="">
+        <div class="holophone-message-heading-text">
+          <div class="holophone-chat-title">${esc(senderAlias)}</div>
+          <div class="holophone-message-route"><span>TO //</span> ${esc(recipientText)}</div>
+        </div>
+      </div>
+      <div class="holophone-message-tags">
+        <span class="holophone-message-tag">${esc(status)}</span>
+        <span class="holophone-message-tag ${whisperMode === "public" ? "" : "is-private"}">${esc(messengerChannelLabel(whisperMode))}</span>
+        ${String(transaction).trim() ? `<span class="holophone-message-tag is-transaction">${esc(String(transaction).trim())}</span>` : ""}
+      </div>
+      <div class="holophone-network-body holophone-message-body">${body}</div>
+      ${chatClockHTML(clock)}
+      <div class="holophone-network-footer">${esc(footer)}</div>
+    </div>`;
+}
+
+async function postUnavailableNumber(contacts = []) {
+  const era2045 = game.settings.get(MODULE_ID, "era2045");
+  const identity = networkIdentity(era2045);
+  const names = contacts.map((entry) => entry?.name).filter(Boolean);
+  const gmIds = game.users.contents.filter((user) => user.isGM).map((user) => user.id);
+  const whisper = [...new Set([game.user.id, ...gmIds])];
+  const clock = currentChatClock();
+
+  await ChatMessage.create({
+    content: networkCard({
+      headline: `${identity.name} Connection Status`,
+      message: "This number is temporarily unavailable....",
+      era2045,
+      clock
+    }),
+    speaker: ChatMessage.getSpeaker({ scene: canvas.scene, alias: identity.name }),
+    type: CONST.CHAT_MESSAGE_TYPES.OOC,
+    whisper,
+    flags: {
+      [MODULE_ID]: {
+        unavailableNumber: {
+          network: identity.name,
+          contacts: names
+        },
+        clock: chatClockFlag(clock)
+      }
+    }
+  });
+  return true;
+}
+
+async function postNetworkBroadcast({ headline = "", message = "" } = {}) {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can post an official public network broadcast.");
+  const body = String(message ?? "").trim();
+  if (!body) return ui.notifications.warn("Write a public network message first.");
+
+  const era2045 = game.settings.get(MODULE_ID, "era2045");
+  const identity = networkIdentity(era2045);
+  const clock = currentChatClock();
+  await ChatMessage.create({
+    content: networkCard({ headline, message: body, era2045, clock }),
+    speaker: ChatMessage.getSpeaker({ scene: canvas.scene, alias: identity.name }),
+    type: CONST.CHAT_MESSAGE_TYPES.OOC,
+    flags: {
+      [MODULE_ID]: {
+        networkBroadcast: {
+          era: identity.era,
+          network: identity.name,
+          headline: String(headline ?? "").trim() || identity.defaultHeadline
+        },
+        clock: chatClockFlag(clock)
+      }
+    }
+  });
+  ui.notifications.info(`${identity.name} broadcast posted.`);
+  return true;
+}
+
+async function openNetworkComposer() {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can post an official public network broadcast.");
+
+  const identity = networkIdentity();
+  const content = `
+    <div class="holophone-shell holophone-network-shell">
+      <div class="holophone-header">
+        <div class="holophone-logo"><i class="fas fa-tower-broadcast"></i></div>
+        <div>
+          <div class="holophone-title holophone-network-composer-title">${esc(identity.name)} Broadcast</div>
+          <div class="holophone-subtitle">Post a styled public message to the chat log.</div>
+        </div>
+      </div>
+      <div class="holophone-card">
+        <div class="holophone-label">Headline <span class="holophone-muted">(optional)</span></div>
+        <input type="text" class="holophone-broadcast-headline" placeholder="${esc(identity.defaultHeadline)}">
+      </div>
+      <div class="holophone-card">
+        <div class="holophone-label holophone-network-message-label">${esc(identity.name)} Message</div>
+        <textarea class="holophone-broadcast-message" placeholder="Type the public broadcast…"></textarea>
+      </div>
+      <button type="button" class="holophone-btn holophone-send holophone-post-network">
+        <i class="fas fa-tower-broadcast"></i> Post to ${esc(identity.name)}
+      </button>
+      <div class="holophone-muted holophone-tip">This posts publicly. Ctrl/Cmd + Enter also posts.</div>
+    </div>`;
+
+  let dialog = null;
+  let busy = false;
+  let eraHook = null;
+  dialog = new Dialog({
+    title: `Compose ${identity.name} Broadcast`,
+    content,
+    buttons: {},
+    render: (html) => {
+      const app = html[0].closest(".app");
+      applyDialogTheme(app, undefined, "network");
+      const root = html[0].querySelector(".holophone-network-shell");
+      const headline = root.querySelector(".holophone-broadcast-headline");
+      const message = root.querySelector(".holophone-broadcast-message");
+      const postButton = root.querySelector(".holophone-post-network");
+      const composerTitle = root.querySelector(".holophone-network-composer-title");
+      const messageLabel = root.querySelector(".holophone-network-message-label");
+
+      const updateComposerEra = (era2045) => {
+        const current = networkIdentity(Boolean(era2045));
+        applyDialogTheme(app, Boolean(era2045), "network");
+        composerTitle.textContent = `${current.name} Broadcast`;
+        messageLabel.textContent = `${current.name} Message`;
+        headline.placeholder = current.defaultHeadline;
+        postButton.innerHTML = `<i class="fas fa-tower-broadcast"></i> Post to ${esc(current.name)}`;
+      };
+
+      const post = async () => {
+        if (busy) return;
+        busy = true;
+        postButton.disabled = true;
+        try {
+          const posted = await postNetworkBroadcast({ headline: headline.value, message: message.value });
+          if (posted) dialog.close();
+        } catch (error) {
+          console.error(`${MODULE_ID} | Network broadcast failed`, error);
+          ui.notifications.error(error.message ?? "The public network broadcast failed.");
+        } finally {
+          busy = false;
+          postButton.disabled = false;
+        }
+      };
+
+      postButton.addEventListener("click", post);
+      message.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") post();
+      });
+      eraHook = (value) => updateComposerEra(Boolean(value));
+      Hooks.on("holophone-era2045-changed", eraHook);
+      message.focus();
+    },
+    close: () => {
+      if (eraHook) Hooks.off("holophone-era2045-changed", eraHook);
+    }
+  }, { width: 560, height: "auto", resizable: true });
+
+  dialog.render(true);
+  return dialog;
+}
+
+async function callREO(actor) {
+  if (!actor) return ui.notifications.warn("Select a real caller in From first.");
+  if (!canUseActor(actor)) return ui.notifications.warn(`You must own ${actor.name} to place this call.`);
+
+  const lifestyleSkipped = skipLifestyleChecks();
+  const lifestyle = lifestyleSkipped ? null : inspectLifestyle(actor);
+  const lifestyleTotal = lifestyle?.totalMonthly ?? null;
+  const waived = !lifestyleSkipped && lifestyleTotal > REO_FREE_THRESHOLD;
+  if (!waived && !actorHasWealth(actor)) return ui.notifications.warn(`${actor.name} does not have a Cyberpunk RED ledger for the 5eb call fee.`);
+
+  const membership = findMembership(actor, "reo");
+  const coverage = membership ? `${membership.tier} Membership` : "Uncovered / Cash Call";
+  const formula = membership ? "1d6+2" : "1d6+3";
+  const feeText = waived
+    ? `Waived — food + housing ${lifestyleTotal}eb/month`
+    : lifestyleSkipped
+      ? `${REO_CALL_FEE}eb deducted — lifestyle check disabled`
+      : `${REO_CALL_FEE}eb deducted`;
+
+  const confirmed = await Dialog.confirm({
+    title: "Call R.E.O. Meatwagon?",
+    content: `
+      <div class="holophone-confirm">
+        <p><b>Caller:</b> ${esc(actor.name)}</p>
+        <p><b>Coverage:</b> ${esc(coverage)}</p>
+        ${lifestyleSkipped
+          ? `<p><b>Lifestyle check:</b> Disabled by GM</p>`
+          : `<p><b>Food + housing:</b> ${lifestyleTotal}eb/month</p>`}
+        <p><b>Holophone call fee:</b> ${waived ? "Free" : `${REO_CALL_FEE}eb`}</p>
+        <p class="holophone-muted">Membership, Cash Call, transport, and treatment charges remain governed by the R.E.O. policy terms.</p>
+      </div>`,
+    yes: () => true,
+    no: () => false,
+    defaultYes: false
+  });
+  if (!confirmed) return false;
+
+  if (!waived) await adjustWealthRaw(actor, -REO_CALL_FEE, "R.E.O. Meatwagon Holophone Call Fee");
+  const roll = await new Roll(formula).evaluate();
+  const clock = currentChatClock();
+  await ChatMessage.create({
+    content: emergencyCard({
+      service: "R.E.O. Meatwagon Inc.",
+      actor,
+      coverage,
+      eta: roll.total,
+      formula,
+      feeText,
+      details: "Dispatch accepted. Membership/Cash Call service billing is handled separately under the active policy terms.",
+      clock
+    }),
+    speaker: emergencySpeaker(actor),
+    type: CONST.CHAT_MESSAGE_TYPES.ROLL,
+    rolls: [roll],
+    flags: {
+      [MODULE_ID]: {
+        emergency: {
+          service: "reo",
+          actorUuid: actor.uuid,
+          waived,
+          lifestyle: lifestyleTotal,
+          lifestyleCheckSkipped: lifestyleSkipped
+        },
+        clock: chatClockFlag(clock)
+      }
+    }
+  });
+  ui.notifications.info(`R.E.O. Meatwagon dispatch requested for ${actor.name}.`);
+  return true;
+}
+
+async function callTrauma(actor) {
+  if (!actor) return ui.notifications.warn("Select a real caller in From first.");
+  if (!canUseActor(actor)) return ui.notifications.warn(`You must own ${actor.name} to place this call.`);
+
+  const membership = findMembership(actor, "trauma");
+  if (!membership) return ui.notifications.warn(`${actor.name} does not have an active Trauma Team membership.`);
+
+  const confirmed = await Dialog.confirm({
+    title: "Call Trauma Team?",
+    content: `
+      <div class="holophone-confirm">
+        <p><b>Caller:</b> ${esc(actor.name)}</p>
+        <p><b>Membership:</b> ${esc(membership.tier)}</p>
+        <p><b>Response:</b> 1d6 Rounds</p>
+      </div>`,
+    yes: () => true,
+    no: () => false,
+    defaultYes: false
+  });
+  if (!confirmed) return false;
+
+  const formula = "1d6";
+  const roll = await new Roll(formula).evaluate();
+  const clock = currentChatClock();
+  await ChatMessage.create({
+    content: emergencyCard({
+      service: "Trauma Team International",
+      actor,
+      coverage: `${membership.tier} Membership`,
+      eta: roll.total,
+      formula,
+      feeText: "Covered by active membership",
+      details: "Policy authenticated. Trauma Team is inbound.",
+      clock
+    }),
+    speaker: emergencySpeaker(actor),
+    type: CONST.CHAT_MESSAGE_TYPES.ROLL,
+    rolls: [roll],
+    flags: {
+      [MODULE_ID]: {
+        emergency: { service: "trauma", actorUuid: actor.uuid, membershipUuid: membership.item.uuid },
+        clock: chatClockFlag(clock)
+      }
+    }
+  });
+  ui.notifications.info(`Trauma Team dispatch requested for ${actor.name}.`);
+  return true;
+}
+
+function pickerHTML(label, placeholder, selectedKeys = [], multi = false) {
+  return `
+    <div class="holophone-field">
+      <div class="holophone-label">${esc(label)}</div>
+      <div class="holophone-picker" data-picker="${esc(label)}" data-multi="${multi ? "1" : "0"}">
+        <input class="holophone-pick-input" type="text" placeholder="${esc(placeholder)}${multi ? " (comma to add)" : ""}">
+        <div class="holophone-pick-display" data-keys="${esc(selectedKeys.join(","))}"></div>
+        <div class="holophone-pick-menu"></div>
+      </div>
+    </div>`;
+}
+
+function actorPickerEntry(actor) {
+  return {
+    key: `actor:${actor.id}`,
+    kind: "actor",
+    actor,
+    actorId: actor.id,
+    name: actor.name,
+    img: actor.img ?? "icons/svg/mystery-man.svg",
+    group: actorHasPlayerOwner(actor) ? "PLAYER CHARACTERS" : "NPCS",
+    unavailable: false
+  };
+}
+
+function contactPickerEntry(contact) {
+  const fallbackId = String(contact.actorUuid ?? "").split(".").at(-1) ?? "";
+  const actor = contact.route === "actor" ? actorById(contact.actorId || fallbackId) : null;
+  return {
+    key: `contact:${contact.id}`,
+    kind: "contact",
+    contactId: contact.id,
+    route: contact.route,
+    actor,
+    actorId: actor?.id ?? contact.actorId ?? "",
+    name: contact.alias,
+    img: contactPortrait(contact.img ?? actor?.img),
+    group: contact.saved ? "SAVED CONTACTS" : contact.source === "gm" ? "GM CONTACTS" : "RECENT CONTACTS",
+    saved: Boolean(contact.saved),
+    source: contact.source === "gm" ? "gm" : "recent",
+    unavailable: contact.route === "actor" && !actor
+  };
+}
+
+function pickerEntries(kind, contactBook) {
+  if (game.user.isGM) return allActors().map(actorPickerEntry);
+  const players = (kind === "From" ? ownedPlayerCharacterActors() : playerCharacterActors()).map(actorPickerEntry);
+  if (kind === "From") return players;
+  const contacts = [...(contactBook?.contacts ?? [])]
+    .sort((a, b) => Number(b.saved) - Number(a.saved)
+      || Number(b.source === "gm") - Number(a.source === "gm")
+      || b.lastSeenAt - a.lastSeenAt)
+    .map(contactPickerEntry);
+  return [...players, ...contacts];
+}
+
+function groupedPickerMenu(entries, selectedKeys = []) {
+  const selected = new Set(selectedKeys);
+  const labels = game.user.isGM
+    ? ["PLAYER CHARACTERS", "NPCS"]
+    : ["PLAYER CHARACTERS", "SAVED CONTACTS", "GM CONTACTS", "RECENT CONTACTS"];
+
+  const group = (label, groupEntries) => {
+    if (!groupEntries.length) return "";
+    return `
+      <div class="holophone-pick-heading">${esc(label)} <span>${groupEntries.length}</span></div>
+      ${groupEntries.map((entry) => `
+        <div class="holophone-pick-item ${selected.has(entry.key) ? "selected" : ""} ${entry.unavailable ? "unavailable" : ""}"
+             data-entry-key="${esc(entry.key)}" role="button" tabindex="0">
+          <img src="${esc(entry.img)}">
+          <span class="holophone-pick-name">
+            <b>${esc(entry.name)}</b>
+            ${entry.kind === "contact" ? `<small>${entry.saved ? "Saved contact" : entry.source === "gm" ? "Added by GM" : "Recent contact"}${entry.unavailable ? " · Unavailable" : ""}</small>` : ""}
+          </span>
+          <span class="holophone-pick-actions">
+            ${entry.kind === "contact" && !entry.saved
+              ? `<button type="button" class="holophone-contact-action" data-contact-action="save" title="Save to contacts" aria-label="Save ${esc(entry.name)} to contacts"><i class="fas fa-address-book"></i></button>`
+              : ""}
+            ${entry.kind === "contact"
+              ? `<button type="button" class="holophone-contact-action" data-contact-action="remove" title="Remove contact" aria-label="Remove ${esc(entry.name)}"><i class="fas fa-trash"></i></button>`
+              : ""}
+            ${selected.has(entry.key) ? '<i class="fas fa-check holophone-pick-check"></i>' : ""}
+          </span>
+        </div>`).join("")}`;
+  };
+
+  return labels.map((label) => group(label, entries.filter((entry) => entry.group === label))).join("")
+    || '<div class="holophone-pick-empty">No matching contacts.</div>';
+}
+
+function wirePicker(root, label, { onChange = null, contactBook = null, entryProvider = null } = {}) {
+  const picker = root.querySelector(`.holophone-picker[data-picker="${label}"]`);
+  const multi = picker.dataset.multi === "1";
+  const input = picker.querySelector(".holophone-pick-input");
+  const display = picker.querySelector(".holophone-pick-display");
+  const menu = picker.querySelector(".holophone-pick-menu");
+  const selection = new Map();
+
+  const normalizeKey = (key) => String(key).includes(":") ? String(key) : `actor:${key}`;
+  const entries = () => entryProvider ? entryProvider() : pickerEntries(label, contactBook);
+  const entryByKey = (key) => entries().find((entry) => entry.key === normalizeKey(key)) ?? null;
+
+  for (const rawKey of (display.dataset.keys ?? "").split(",").filter(Boolean)) {
+    const entry = entryByKey(rawKey);
+    if (entry) selection.set(entry.key, entry);
+  }
+
+  const getKeys = () => [...selection.keys()];
+  const getEntries = () => getKeys().map((key) => entryByKey(key) ?? selection.get(key)).filter(Boolean);
+  const getIds = () => getEntries().map((entry) => entry.actor?.id).filter(Boolean);
+  const notify = () => onChange?.(getEntries());
+
+  function renderChips() {
+    display.replaceChildren();
+    if (!selection.size) {
+      const placeholder = document.createElement("span");
+      placeholder.className = "holophone-pick-placeholder";
+      placeholder.textContent = "Select…";
+      display.appendChild(placeholder);
+    } else {
+      for (const [key, entry] of selection) {
+        const chip = document.createElement("span");
+        chip.className = `holophone-chip ${entry.unavailable ? "unavailable" : ""}`;
+        chip.dataset.entryKey = key;
+        chip.innerHTML = `${esc(entry.name)} <button type="button" class="holophone-chip-remove" title="Remove" aria-label="Remove ${esc(entry.name)}">×</button>`;
+        display.appendChild(chip);
+      }
+    }
+    display.dataset.keys = getKeys().join(",");
+  }
+
+  function renderMenu() {
+    const query = normalize(input.value);
+    const available = entries();
+    const view = query ? available.filter((entry) => normalize(entry.name).includes(query)) : available;
+    menu.innerHTML = groupedPickerMenu(view, getKeys());
+  }
+
+  function openMenu() {
+    renderMenu();
+    menu.classList.add("open");
+  }
+
+  function closeMenu() {
+    menu.classList.remove("open");
+  }
+
+  function remove(id) {
+    if (!selection.delete(id)) return;
+    renderChips();
+    renderMenu();
+    notify();
+  }
+
+  display.addEventListener("click", (event) => {
+    const removeButton = event.target.closest(".holophone-chip-remove");
+    if (removeButton) {
+      event.stopPropagation();
+      return remove(removeButton.closest(".holophone-chip")?.dataset.entryKey);
+    }
+    menu.classList.contains("open") ? closeMenu() : openMenu();
+  });
+
+  input.addEventListener("focus", openMenu);
+  input.addEventListener("input", () => {
+    openMenu();
+    if (!multi || !input.value.includes(",")) return;
+    const names = input.value.split(",").map((name) => normalize(name)).filter(Boolean);
+    for (const name of names) {
+      const entry = entries().find((candidate) => normalize(candidate.name) === name);
+      if (entry) selection.set(entry.key, entry);
+    }
+    input.value = "";
+    renderChips();
+    renderMenu();
+    notify();
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Backspace" || input.value) return;
+    const keys = getKeys();
+    if (keys.length) remove(keys.at(-1));
+  });
+
+  menu.addEventListener("click", async (event) => {
+    const row = event.target.closest(".holophone-pick-item");
+    if (!row) return;
+    const action = event.target.closest(".holophone-contact-action")?.dataset.contactAction;
+    const entry = entryByKey(row.dataset.entryKey);
+    if (!entry) return;
+
+    if (action && entry.kind === "contact" && contactBook) {
+      const contact = contactBook.contacts.find((candidate) => candidate.id === entry.contactId);
+      if (!contact) return;
+      if (action === "save") contact.saved = true;
+      if (action === "remove") {
+        contactBook.contacts = contactBook.contacts.filter((candidate) => candidate.id !== entry.contactId);
+        selection.delete(entry.key);
+      }
+      try {
+        await persistPlayerContactBook(game.user, contactBook);
+        ui.notifications.info(action === "save" ? `${entry.name} saved to contacts.` : `${entry.name} removed from contacts.`);
+      } catch (error) {
+        console.error(`${MODULE_ID} | Contact update failed`, error);
+        ui.notifications.error("The contact list could not be updated.");
+      }
+      renderChips();
+      renderMenu();
+      notify();
+      return;
+    }
+
+    if (!multi) selection.clear();
+    if (multi && selection.has(entry.key)) selection.delete(entry.key);
+    else selection.set(entry.key, entry);
+
+    input.value = "";
+    renderChips();
+    renderMenu();
+    if (!multi) closeMenu();
+    notify();
+  });
+
+  const documentClick = (event) => {
+    if (!picker.contains(event.target)) closeMenu();
+  };
+  document.addEventListener("click", documentClick);
+
+  renderChips();
+  return {
+    getIds,
+    getKeys,
+    getEntries,
+    setKeys(keys = []) {
+      selection.clear();
+      for (const key of keys) {
+        const entry = entryByKey(key);
+        if (entry) selection.set(entry.key, entry);
+      }
+      renderChips();
+      renderMenu();
+      notify();
+    },
+    setIds(ids = []) {
+      this.setKeys(ids.map((id) => `actor:${id}`));
+    },
+    refresh({ prune = true } = {}) {
+      if (prune) {
+        const availableKeys = new Set(entries().map((entry) => entry.key));
+        for (const key of selection.keys()) {
+          if (!availableKeys.has(key)) selection.delete(key);
+        }
+      }
+      renderChips();
+      renderMenu();
+      notify();
+    },
+    destroy() {
+      document.removeEventListener("click", documentClick);
+    }
+  };
+}
+
+async function openContactManager() {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can add contacts to player address books.");
+
+  const players = nonGMPlayerUsers();
+  if (!players.length) return ui.notifications.warn("No player users are available.");
+  const playerOptions = players.map((user) => {
+    const characterName = String(user.character?.name ?? "").trim();
+    const label = characterName && normalize(characterName) !== normalize(user.name)
+      ? `${user.name} — ${characterName}`
+      : String(user.name ?? "Player");
+    return `<option value="${esc(user.id)}">${esc(label)}</option>`;
+  }).join("");
+
+  const content = `
+    <div class="holophone-shell holophone-contact-manager-shell">
+      <div class="holophone-header">
+        <div class="holophone-logo"><i class="fas fa-address-book"></i></div>
+        <div>
+          <div class="holophone-title">Player Contact Access</div>
+          <div class="holophone-subtitle">Add an NPC to one player's or every player's private directory.</div>
+        </div>
+      </div>
+      <div class="holophone-card">
+        ${pickerHTML("NPC Contact", "Search NPCs…", [], false)}
+        <div class="holophone-muted holophone-contact-manager-note">Player Characters and container actors are excluded.</div>
+      </div>
+      <div class="holophone-card holophone-contact-manager-grid">
+        <label class="holophone-field">
+          <span class="holophone-label">Contact Name / Alias</span>
+          <input type="text" class="holophone-contact-alias" maxlength="120" placeholder="Defaults to the NPC name">
+        </label>
+        <label class="holophone-field">
+          <span class="holophone-label">Add For</span>
+          <select class="holophone-contact-target">
+            <option value="all">All Players</option>
+            <optgroup label="One Player">${playerOptions}</optgroup>
+          </select>
+        </label>
+      </div>
+      <button type="button" class="holophone-btn holophone-send holophone-grant-contact">
+        <i class="fas fa-user-plus"></i> Add to Player Contacts
+      </button>
+      <div class="holophone-muted holophone-tip">The contact appears under GM Contacts above Recent Contacts in the selected player interface. Players may save or remove it.</div>
+    </div>`;
+
+  let dialog = null;
+  let busy = false;
+  let npcAPI = null;
+  dialog = new Dialog({
+    title: "Manage Player Contacts",
+    content,
+    buttons: {},
+    render: (html) => {
+      const app = html[0].closest(".app");
+      applyDialogTheme(app, undefined, "contacts");
+      const root = html[0].querySelector(".holophone-contact-manager-shell");
+      const aliasInput = root.querySelector(".holophone-contact-alias");
+      const targetSelect = root.querySelector(".holophone-contact-target");
+      const grantButton = root.querySelector(".holophone-grant-contact");
+      let generatedAlias = "";
+
+      const npcEntries = () => allActors()
+        .filter((actor) => !actorHasPlayerOwner(actor))
+        .map(actorPickerEntry);
+      npcAPI = wirePicker(root, "NPC Contact", {
+        entryProvider: npcEntries,
+        onChange: (entries) => {
+          const actor = entries[0]?.actor ?? null;
+          const currentAlias = aliasInput.value.trim();
+          if (!currentAlias || currentAlias === generatedAlias) {
+            generatedAlias = actor?.name ?? "";
+            aliasInput.value = generatedAlias;
+          }
+        }
+      });
+
+      const grant = async () => {
+        if (busy) return;
+        const actor = npcAPI.getEntries()[0]?.actor ?? null;
+        if (!actor) return ui.notifications.warn("Choose an NPC contact first.");
+        const targetValue = targetSelect.value;
+        const userIds = targetValue === "all" ? players.map((user) => user.id) : [targetValue];
+
+        busy = true;
+        grantButton.disabled = true;
+        try {
+          const result = await grantPlayerContact({ actor, alias: aliasInput.value, userIds });
+          if (!result) return;
+          const audience = result.users.length === 1 ? result.users[0].name : `${result.users.length} players`;
+          ui.notifications.info(`${result.alias} added to ${audience}.`);
+        } catch (error) {
+          console.error(`${MODULE_ID} | Player contact assignment failed`, error);
+          ui.notifications.error(error.message ?? "The contact could not be added to the selected player address book.");
+        } finally {
+          busy = false;
+          grantButton.disabled = false;
+        }
+      };
+
+      grantButton.addEventListener("click", grant);
+      aliasInput.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") grant();
+      });
+    },
+    close: () => npcAPI?.destroy()
+  }, { width: 620, height: "auto", resizable: true });
+
+  dialog.render(true);
+  return dialog;
+}
+
+function normalizeLaunchInput(input) {
+  let value = input;
+  if (Array.isArray(value)) value = value[0] ?? {};
+  if (!value || typeof value !== "object") value = {};
+  const fromId = value.fromId ?? value.fromActorId ?? value.actorId ?? "";
+  const rawTo = value.toIds ?? value.toActorIds ?? value.recipients ?? [];
+  const toIds = Array.isArray(rawTo)
+    ? rawTo
+    : rawTo === undefined || rawTo === null
+      ? []
+      : String(rawTo).split(",");
+  return {
+    fromId: String(fromId || ""),
+    toIds: toIds.map(String).map((id) => id.trim()).filter(Boolean),
+    message: String(value.message ?? "")
+  };
+}
+
+function applyDialogTheme(app, era2045 = game.settings.get(MODULE_ID, "era2045"), kind = null) {
+  const element = app?.element?.[0] ?? app;
+  if (!element) return;
+  element.classList.add("holophone-dialog");
+  const dialogKind = kind ?? element.dataset.holophoneDialogKind ?? "messenger";
+  element.dataset.holophoneDialogKind = dialogKind;
+  element.style.setProperty("--holophone-accent", era2045 ? ERA_2045 : ERA_2077);
+  const title = element.querySelector(".window-title");
+  if (title) {
+    if (dialogKind === "network") title.textContent = `Compose ${networkIdentity(era2045).name} Broadcast`;
+    else if (dialogKind === "contacts") title.textContent = "Manage Player Contacts";
+    else title.textContent = `${era2045 ? "Agent" : "Holophone"} Messenger`;
+  }
+}
+
+function refreshOpenDialogThemes(era2045) {
+  for (const element of document.querySelectorAll(".holophone-dialog")) applyDialogTheme(element, era2045);
+}
+
+async function openMessenger(input = null) {
+  const launch = normalizeLaunchInput(input);
+  const selectedActor = canvas.tokens.controlled[0]?.actor ?? game.user.character ?? null;
+  const prefs = await game.user.getFlag("world", PREF_FLAG) ?? {};
+  const contactBook = game.user.isGM ? null : playerContactBook(game.user);
+  const preferredFrom = launch.fromId || prefs.fromId || selectedActor?.id || "";
+  const preferredTo = launch.toIds.length
+    ? launch.toIds.map((id) => `actor:${id}`)
+    : String(prefs.toKeysCSV ?? prefs.toIdsCSV ?? "").split(",").map((key) => key.trim()).filter(Boolean);
+  const corruptionPct = clamp(prefs.corruptionPct ?? 50, 0, 100);
+  const whisperPreference = game.user.isGM
+    ? Boolean(prefs.whisperToPlayers)
+    : Boolean(prefs.whisperToGM ?? prefs.whisper);
+  const whisperLabel = game.user.isGM ? "Whisper to Player" : "Whisper to GM";
+  const fromPlaceholder = game.user.isGM ? "Search player characters or NPCs…" : "Search your player characters…";
+  const toPlaceholder = game.user.isGM ? "Search player characters or NPCs…" : "Search player characters or contacts…";
+
+  const content = `
+    <div class="holophone-shell">
+      <div class="holophone-header">
+        <div class="holophone-logo"><i class="fas fa-mobile-screen-button"></i></div>
+        <div>
+          <div class="holophone-title">${esc(currentTerm())} Messenger</div>
+          <div class="holophone-subtitle holophone-messenger-subtitle">${esc(networkIdentity().name)} messaging, transfers, and emergency dispatch</div>
+        </div>
+      </div>
+
+      <div class="holophone-grid-2">
+        <div class="holophone-card">
+          ${pickerHTML("From", fromPlaceholder, preferredFrom ? [`actor:${preferredFrom}`] : [], false)}
+          <input type="text" class="holophone-alias-from" placeholder="Alias for From (optional)" value="${esc(prefs.fromAlias ?? "")}">
+        </div>
+        <div class="holophone-card">
+          ${pickerHTML("To", toPlaceholder, preferredTo, true)}
+          <input type="text" class="holophone-alias-to" placeholder="Alias for To (single recipient only)" value="${esc(prefs.toAlias ?? "")}">
+          ${game.user.isGM ? `
+            <div class="holophone-to-tools">
+              <label class="holophone-check"><input type="checkbox" class="holophone-all-players"> Add all Player Characters on this Scene</label>
+              <button type="button" class="holophone-btn holophone-btn-contact-manager">
+                <i class="fas fa-address-book"></i> Manage Player Contacts
+              </button>
+            </div>` : ""}
+        </div>
+      </div>
+
+      <div class="holophone-card">
+        <div class="holophone-label">Message</div>
+        <textarea class="holophone-message" placeholder="Type your in-character message…">${esc(launch.message)}</textarea>
+      </div>
+
+      <div class="holophone-card holophone-options">
+        <label class="holophone-check"><input type="checkbox" class="holophone-emote" ${prefs.emote ? "checked" : ""}> Emote style</label>
+        <label class="holophone-check"><input type="checkbox" class="holophone-whisper" ${whisperPreference ? "checked" : ""}> ${whisperLabel}</label>
+        ${game.user.isGM ? `
+          <label class="holophone-check"><input type="checkbox" class="holophone-compromised" ${prefs.compromised ? "checked" : ""}> Compromised</label>
+          <label class="holophone-check holophone-with-number">
+            <input type="checkbox" class="holophone-corrupted" ${prefs.corrupted ? "checked" : ""}> Corrupted
+            <input type="number" class="holophone-corruption-pct" min="0" max="100" step="1" value="${corruptionPct}"><span>%</span>
+          </label>
+          <label class="holophone-check holophone-with-number">
+            <input type="checkbox" class="holophone-charge" ${prefs.chargeOn ? "checked" : ""}> Eb Charge
+            <input type="number" class="holophone-charge-amount" min="0" step="1" value="${Math.max(0, Number(prefs.chargeEb) || 0)}">
+          </label>
+          <label class="holophone-check holophone-with-number">
+            <input type="checkbox" class="holophone-credit" ${prefs.creditOn ? "checked" : ""}> Eb Credit
+            <input type="number" class="holophone-credit-amount" min="0" step="1" value="${Math.max(0, Number(prefs.creditEb) || 0)}">
+          </label>` : ""}
+        <label class="holophone-check holophone-with-number">
+          <input type="checkbox" class="holophone-transfer" ${prefs.transferOn ? "checked" : ""}> Transfer Eb
+          <input type="number" class="holophone-transfer-amount" min="0" step="1" value="${Math.max(0, Number(prefs.transferEb) || 0)}">
+        </label>
+        ${game.user.isGM
+          ? `<label class="holophone-check"><input type="checkbox" class="holophone-era" ${game.settings.get(MODULE_ID, "era2045") ? "checked" : ""}> 2045 Mode</label>`
+          : `<label class="holophone-check holophone-disabled"><input type="checkbox" disabled ${game.settings.get(MODULE_ID, "era2045") ? "checked" : ""}> 2045 Mode (GM)</label>`}
+      </div>
+
+      <div class="holophone-card holophone-emergency-panel">
+        <div class="holophone-section-title">Emergency Services</div>
+        <div class="holophone-emergency-grid">
+          <div class="holophone-service">
+            <div><b>R.E.O. Meatwagon</b><div class="holophone-reo-status holophone-muted">Select a real caller.</div></div>
+            <button type="button" class="holophone-btn holophone-btn-reo"><i class="fas fa-truck-medical"></i> Call R.E.O.</button>
+          </div>
+          <div class="holophone-service">
+            <div><b>Trauma Team</b><div class="holophone-trauma-status holophone-muted">Membership required.</div></div>
+            <button type="button" class="holophone-btn holophone-btn-trauma"><i class="fas fa-helicopter"></i> Call Trauma Team</button>
+          </div>
+        </div>
+        ${game.user.isGM ? `
+          <label class="holophone-check holophone-emergency-mode">
+            <input type="checkbox" class="holophone-skip-lifestyle" ${skipLifestyleChecks() ? "checked" : ""}>
+            Skip lifestyle check
+          </label>
+          <div class="holophone-muted">R.E.O. uses its flat 5eb call fee while enabled. Trauma Team membership rules are unchanged.</div>` : ""}
+      </div>
+
+      ${game.user.isGM ? `
+        <div class="holophone-card holophone-network-panel">
+          <div class="holophone-section-title">Public Network</div>
+          <div class="holophone-service">
+            <div>
+              <b class="holophone-network-name">${esc(networkIdentity().name)} Broadcast</b>
+              <div class="holophone-network-status holophone-muted">Post a styled public feed message to chat.</div>
+            </div>
+            <button type="button" class="holophone-btn holophone-btn-network">
+              <i class="fas fa-tower-broadcast"></i> Compose ${esc(networkIdentity().name)}
+            </button>
+          </div>
+        </div>` : ""}
+
+      <button type="button" class="holophone-btn holophone-send"><i class="fas fa-comment-dots"></i> Send IC</button>
+      <div class="holophone-muted holophone-tip">${game.user.isGM
+        ? "Ctrl/Cmd + Enter sends. Containers are excluded; contacts are separated into Player Characters and NPCs."
+        : "Ctrl/Cmd + Enter sends. Your directory contains Player Characters plus your saved, GM-added, and recent contacts."}</div>
+    </div>`;
+
+  let eraHook = null;
+  let emergencyRulesHook = null;
+  let playerContactHook = null;
+  let dialog = null;
+  let busy = false;
+  const cleanup = [];
+
+  dialog = new Dialog({
+    title: `${currentTerm()} Messenger`,
+    content,
+    buttons: {},
+    render: (html) => {
+      const app = html[0].closest(".app");
+      applyDialogTheme(app, undefined, "messenger");
+      const root = html[0].querySelector(".holophone-shell");
+      const query = (selector) => root.querySelector(selector);
+
+      const fromAPI = wirePicker(root, "From", { onChange: updateEmergencyStatus, contactBook });
+      const toAPI = wirePicker(root, "To", { contactBook });
+      cleanup.push(() => fromAPI.destroy(), () => toAPI.destroy());
+
+      if (!game.user.isGM && contactBook) {
+        playerContactHook = (user) => {
+          if (user?.id !== game.user.id) return;
+          const refreshed = playerContactBook(game.user);
+          contactBook.version = refreshed.version;
+          contactBook.contacts = refreshed.contacts;
+          toAPI.refresh();
+        };
+        Hooks.on("updateUser", playerContactHook);
+      }
+
+      const messageBox = query(".holophone-message");
+      const fromAlias = query(".holophone-alias-from");
+      const toAlias = query(".holophone-alias-to");
+      const emote = query(".holophone-emote");
+      const whisper = query(".holophone-whisper");
+      const compromised = query(".holophone-compromised");
+      const corrupted = query(".holophone-corrupted");
+      const corruptionInput = query(".holophone-corruption-pct");
+      const chargeOn = query(".holophone-charge");
+      const chargeAmount = query(".holophone-charge-amount");
+      const creditOn = query(".holophone-credit");
+      const creditAmount = query(".holophone-credit-amount");
+      const transferOn = query(".holophone-transfer");
+      const transferAmount = query(".holophone-transfer-amount");
+      const eraToggle = query(".holophone-era");
+      const skipLifestyleToggle = query(".holophone-skip-lifestyle");
+      const allPlayers = query(".holophone-all-players");
+      const reoButton = query(".holophone-btn-reo");
+      const traumaButton = query(".holophone-btn-trauma");
+      const networkButton = query(".holophone-btn-network");
+      const contactManagerButton = query(".holophone-btn-contact-manager");
+      const networkName = query(".holophone-network-name");
+      const messengerSubtitle = query(".holophone-messenger-subtitle");
+
+      function selectedCaller() {
+        return fromAPI.getEntries()[0]?.actor ?? null;
+      }
+
+      function updateEmergencyStatus() {
+        const actor = selectedCaller();
+        const reoStatus = query(".holophone-reo-status");
+        const traumaStatus = query(".holophone-trauma-status");
+        const usable = canUseActor(actor);
+
+        if (!actor) {
+          reoStatus.textContent = "Select a real caller.";
+          traumaStatus.textContent = "Membership required.";
+          reoButton.disabled = true;
+          traumaButton.disabled = true;
+          return;
+        }
+
+        const lifestyleSkipped = skipLifestyleChecks();
+        if (lifestyleSkipped) {
+          reoStatus.textContent = `${REO_CALL_FEE}eb flat call · lifestyle check disabled`;
+        } else {
+          const lifestyle = inspectLifestyle(actor);
+          const waived = lifestyle.totalMonthly > REO_FREE_THRESHOLD;
+          reoStatus.textContent = `${waived ? "Free call" : `${REO_CALL_FEE}eb call`} · food + housing ${lifestyle.totalMonthly}eb/month`;
+        }
+        reoButton.disabled = !usable;
+
+        const membership = findMembership(actor, "trauma");
+        traumaStatus.textContent = membership ? `${membership.tier} membership detected` : "No active membership detected";
+        traumaButton.disabled = !usable || !membership;
+      }
+
+      function updateNetworkLabels(era2045 = game.settings.get(MODULE_ID, "era2045")) {
+        const identity = networkIdentity(Boolean(era2045));
+        if (messengerSubtitle) messengerSubtitle.textContent = `${identity.name} messaging, transfers, and emergency dispatch`;
+        if (networkName) networkName.textContent = `${identity.name} Broadcast`;
+        if (networkButton) networkButton.innerHTML = `<i class="fas fa-tower-broadcast"></i> Compose ${esc(identity.name)}`;
+      }
+
+      if (allPlayers) {
+        allPlayers.addEventListener("change", () => {
+          if (!allPlayers.checked) return;
+          const ids = [...new Set((canvas.tokens?.placeables ?? [])
+            .filter((token) => isContactActor(token.actor) && token.actor.hasPlayerOwner)
+            .map((token) => token.actor.id))];
+          toAPI.setIds(ids);
+        });
+      }
+
+      if (eraToggle) {
+        eraToggle.addEventListener("change", async () => {
+          await game.settings.set(MODULE_ID, "era2045", eraToggle.checked);
+        });
+      }
+
+      if (skipLifestyleToggle) {
+        skipLifestyleToggle.addEventListener("change", async () => {
+          await game.settings.set(MODULE_ID, "skipLifestyleChecks", skipLifestyleToggle.checked);
+        });
+      }
+
+      reoButton.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
+        reoButton.disabled = true;
+        traumaButton.disabled = true;
+        try {
+          await callREO(selectedCaller());
+        } catch (error) {
+          console.error(`${MODULE_ID} | R.E.O. call failed`, error);
+          ui.notifications.error(error.message ?? "The R.E.O. call failed.");
+        } finally {
+          busy = false;
+          updateEmergencyStatus();
+        }
+      });
+
+      traumaButton.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
+        reoButton.disabled = true;
+        traumaButton.disabled = true;
+        try {
+          await callTrauma(selectedCaller());
+        } catch (error) {
+          console.error(`${MODULE_ID} | Trauma Team call failed`, error);
+          ui.notifications.error(error.message ?? "The Trauma Team call failed.");
+        } finally {
+          busy = false;
+          updateEmergencyStatus();
+        }
+      });
+
+      networkButton?.addEventListener("click", () => openNetworkComposer());
+      contactManagerButton?.addEventListener("click", () => openContactManager());
+
+      async function sendMessage() {
+        const fromActor = selectedCaller();
+        const recipientEntries = toAPI.getEntries();
+        if (!recipientEntries.length) return ui.notifications.warn("Pick at least one recipient in To.");
+
+        const unavailableContacts = recipientEntries.filter((entry) => entry.kind === "contact" && entry.unavailable);
+        if (unavailableContacts.length) {
+          await postUnavailableNumber(unavailableContacts);
+          return;
+        }
+
+        const relayContacts = recipientEntries.filter((entry) => entry.kind === "contact" && entry.route === "gm");
+        if (relayContacts.length && relayContacts.length !== recipientEntries.length) {
+          return ui.notifications.warn("Send to an alias-only contact separately from other recipients.");
+        }
+
+        const recipients = [...new Map(recipientEntries
+          .map((entry) => entry.actor)
+          .filter(Boolean)
+          .map((actor) => [actor.id, actor])).values()];
+        if (!recipients.length && !relayContacts.length) return ui.notifications.warn("Pick at least one available recipient in To.");
+
+        const whisperPlayerIds = game.user.isGM && whisper.checked
+          ? playerOwnersForActors(recipients.filter(actorHasPlayerOwner)).map((user) => user.id)
+          : [];
+        if (game.user.isGM && whisper.checked && !whisperPlayerIds.length) {
+          return ui.notifications.warn("Whisper to Player requires at least one Player Character recipient in To.");
+        }
+
+        const rawMessage = messageBox.value ?? "";
+        if (!rawMessage.trim()) return ui.notifications.warn("Write a message first.");
+
+        const senderAliasInput = fromAlias.value.trim();
+        const senderAlias = senderAliasInput || fromActor?.name || "";
+        if (!senderAlias) return ui.notifications.warn("Pick a sender or enter a From alias.");
+
+        const monetaryActions = [chargeOn?.checked, creditOn?.checked, transferOn?.checked].filter(Boolean).length;
+        if (monetaryActions > 1) return ui.notifications.warn("Choose only one monetary action: Charge, Credit, or Transfer.");
+
+        if (transferOn?.checked && (!fromActor || !canUseActor(fromActor))) {
+          return ui.notifications.warn("You must own the real From actor to transfer eb.");
+        }
+        if (!game.user.isGM && transferOn?.checked
+          && recipientEntries.some((entry) => entry.kind !== "actor" || !actorHasPlayerOwner(entry.actor))) {
+          return ui.notifications.warn("Player transfers can only be sent to Player Character recipients.");
+        }
+
+        const use2045 = game.settings.get(MODULE_ID, "era2045");
+        const term = use2045 ? "Agent" : "Holophone";
+        let tag = `${term} Message`;
+        if (compromised?.checked) tag = `Compromised ${term} Message`;
+        if (corrupted?.checked) tag = `Corrupted ${term} Message`;
+
+        const percentage = clamp(corruptionInput?.value ?? 50, 0, 100);
+        const processedMessage = corrupted?.checked ? garble(rawMessage, percentage / 100) : rawMessage;
+        let body = esc(processedMessage).replace(/\r\n|\r|\n/g, "<br>");
+        if (emote.checked) body = `<em>${body}</em>`;
+
+        const recipientNames = recipientEntries.map((entry) => entry.name);
+        const recipientAlias = toAlias.value.trim();
+        const recipientText = recipientEntries.length === 1 && recipientAlias ? recipientAlias : recipientNames.join(", ");
+        const ledgerFrom = senderAlias || "Unknown";
+        const ledgerTo = recipientText || "Unknown";
+
+        let note = "";
+        if (game.user.isGM && chargeOn?.checked) {
+          const amount = Math.max(0, Math.trunc(Number(chargeAmount.value) || 0));
+          if (amount > 0) {
+            note = `${amount}eb Charge `;
+            for (const recipient of recipients) {
+              try {
+                await adjustWealth(recipient, -amount, `${term} Charge (to ${ledgerFrom})`);
+              } catch (error) {
+                console.warn(`${MODULE_ID} | Charge failed for ${recipient.name}`, error);
+                ui.notifications.warn(`Could not deduct eb from ${recipient.name}.`);
+              }
+            }
+          }
+        }
+
+        if (game.user.isGM && creditOn?.checked) {
+          const amount = Math.max(0, Math.trunc(Number(creditAmount.value) || 0));
+          if (amount > 0) {
+            note = `${amount}eb Credit `;
+            for (const recipient of recipients) {
+              try {
+                await adjustWealth(recipient, amount, `${term} Credit (from ${ledgerFrom})`);
+              } catch (error) {
+                console.warn(`${MODULE_ID} | Credit failed for ${recipient.name}`, error);
+                ui.notifications.warn(`Could not add eb to ${recipient.name}.`);
+              }
+            }
+          }
+        }
+
+        if (transferOn.checked) {
+          const amount = Math.max(0, Math.trunc(Number(transferAmount.value) || 0));
+          if (amount > 0) {
+            await adjustWealthRaw(fromActor, -(amount * recipients.length), `${term} Transfer (sent to ${ledgerTo})`);
+            for (const recipient of recipients) {
+              try {
+                await adjustWealth(recipient, amount, `${term} Transfer (received from ${ledgerFrom})`);
+              } catch (error) {
+                console.warn(`${MODULE_ID} | Transfer failed for ${recipient.name}`, error);
+                ui.notifications.warn(`Could not deliver the transfer to ${recipient.name}.`);
+              }
+            }
+            note = `${amount}eb Transfer `;
+          }
+        }
+
+        const clock = currentChatClock();
+        const whisperMode = relayContacts.length
+          ? "gm-relay"
+          : whisper.checked
+            ? (game.user.isGM ? "players" : "gm")
+            : "public";
+        const chatContent = messengerCard({
+          senderAlias,
+          recipientText,
+          body,
+          status: tag,
+          transaction: note,
+          whisperMode,
+          portrait: aliasPortrait(fromActor, senderAlias, Boolean(senderAliasInput)),
+          era2045: use2045,
+          clock
+        });
+
+        let speaker;
+        if (fromActor) {
+          const tokenDoc = fromActor.getActiveTokens?.()[0]?.document ?? null;
+          speaker = ChatMessage.getSpeaker({ scene: canvas.scene, actor: fromActor, token: tokenDoc ?? undefined, alias: senderAlias });
+        } else {
+          speaker = ChatMessage.getSpeaker({ scene: canvas.scene, alias: senderAlias });
+        }
+
+        const whisperIds = resolveMessengerWhisperIds({
+          recipients,
+          relayContacts,
+          whisper: whisper.checked,
+          senderIsGM: game.user.isGM
+        });
+        await ChatMessage.create({
+          content: chatContent,
+          speaker,
+          type: CONST.CHAT_MESSAGE_TYPES.IC,
+          whisper: whisperIds,
+          flags: {
+            [MODULE_ID]: {
+              messenger: {
+                senderActorUuid: fromActor?.uuid ?? "",
+                senderAlias,
+                recipientActorIds: recipients.map((actor) => actor.id),
+                relayAliases: relayContacts.map((entry) => entry.name),
+                whisperMode
+              },
+              clock: chatClockFlag(clock)
+            }
+          }
+        });
+
+        if (game.user.isGM) {
+          try {
+            await rememberIncomingContact({ actor: fromActor, alias: senderAlias, recipients });
+          } catch (error) {
+            console.error(`${MODULE_ID} | Recent contact delivery failed`, error);
+            ui.notifications.warn("The message was sent, but a player's recent contacts could not be updated.");
+          }
+        }
+
+        await game.user.setFlag("world", PREF_FLAG, {
+          fromId: fromActor?.id ?? "",
+          toKeysCSV: toAPI.getKeys().join(","),
+          toIdsCSV: toAPI.getIds().join(","),
+          fromAlias: senderAliasInput,
+          toAlias: recipientAlias,
+          emote: emote.checked,
+          whisper: whisper.checked,
+          whisperToPlayers: game.user.isGM ? whisper.checked : Boolean(prefs.whisperToPlayers),
+          whisperToGM: game.user.isGM ? Boolean(prefs.whisperToGM ?? prefs.whisper) : whisper.checked,
+          compromised: Boolean(compromised?.checked),
+          corrupted: Boolean(corrupted?.checked),
+          corruptionPct: percentage,
+          chargeOn: Boolean(chargeOn?.checked),
+          chargeEb: Math.max(0, Math.trunc(Number(chargeAmount?.value) || 0)),
+          creditOn: Boolean(creditOn?.checked),
+          creditEb: Math.max(0, Math.trunc(Number(creditAmount?.value) || 0)),
+          transferOn: transferOn.checked,
+          transferEb: Math.max(0, Math.trunc(Number(transferAmount.value) || 0)),
+          era2045: use2045
+        });
+
+        messageBox.value = "";
+      }
+
+      query(".holophone-send").addEventListener("click", sendMessage);
+      messageBox.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") sendMessage();
+      });
+
+      eraHook = (value) => {
+        applyDialogTheme(app, Boolean(value), "messenger");
+        updateNetworkLabels(Boolean(value));
+      };
+      Hooks.on("holophone-era2045-changed", eraHook);
+      emergencyRulesHook = () => {
+        if (skipLifestyleToggle) skipLifestyleToggle.checked = skipLifestyleChecks();
+        updateEmergencyStatus();
+      };
+      Hooks.on("holophone-skipLifestyleChecks-changed", emergencyRulesHook);
+      updateEmergencyStatus();
+      updateNetworkLabels();
+    },
+    close: () => {
+      for (const fn of cleanup) fn();
+      if (eraHook) Hooks.off("holophone-era2045-changed", eraHook);
+      if (emergencyRulesHook) Hooks.off("holophone-skipLifestyleChecks-changed", emergencyRulesHook);
+      if (playerContactHook) Hooks.off("updateUser", playerContactHook);
+    }
+  }, { width: 760, height: "auto", resizable: true });
+
+  dialog.render(true);
+  return dialog;
+}
+
+async function ensureWorldMacro() {
+  if (!game.user.isGM) return;
+  const activeGM = game.users.activeGM;
+  if (activeGM && activeGM.id !== game.user.id) return;
+
+  const existing = game.macros.find((macro) => macro.getFlag(MODULE_ID, "launcher") === true)
+    ?? game.macros.getName("Holophone/Agent Messenger™");
+  if (existing) {
+    const update = {};
+    if (existing.img !== LAUNCHER_ICON) update.img = LAUNCHER_ICON;
+    if (existing.getFlag(MODULE_ID, "launcher") !== true) update[`flags.${MODULE_ID}.launcher`] = true;
+    if (Object.keys(update).length) await existing.update(update);
+    return existing;
+  }
+
+  return Macro.create({
+    name: "Holophone/Agent Messenger™",
+    type: "script",
+    scope: "global",
+    img: LAUNCHER_ICON,
+    command: 'return game.holophone.open(typeof args === "undefined" ? null : args);',
+    flags: { [MODULE_ID]: { launcher: true } }
+  });
+}
+
+Hooks.once("init", () => {
+  game.settings.register(MODULE_ID, "era2045", {
+    name: "2045 Mode",
+    hint: "Use Agent wording and the 2045 red theme instead of Holophone wording and the 2077 cyan theme.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: (value) => {
+      Hooks.callAll("holophone-era2045-changed", value);
+      refreshOpenDialogThemes(value);
+    }
+  });
+  game.settings.register(MODULE_ID, "skipLifestyleChecks", {
+    name: "Skip Lifestyle Check",
+    hint: "Do not inspect food or housing for R.E.O. calls; always use the flat 5eb call fee. Trauma Team membership requirements are unchanged.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: (value) => Hooks.callAll("holophone-skipLifestyleChecks-changed", value)
+  });
+  game._holoEraReg = true;
+});
+
+Hooks.once("ready", async () => {
+  bindDepositHandler();
+
+  try {
+    await purgeReservedNetworkContacts();
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Reserved network contact cleanup failed`, error);
+  }
+
+  try {
+    await upgradeLegacyContactPortraits();
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Legacy contact portrait upgrade failed`, error);
+  }
+
+  const api = {
+    open: openMessenger,
+    openMessenger,
+    callREO,
+    callTrauma,
+    openNetworkComposer,
+    postNetworkBroadcast,
+    openContactManager,
+    grantPlayerContact,
+    inspectLifestyle,
+    findTraumaMembership: (actor) => findMembership(actor, "trauma"),
+    findREOMembership: (actor) => findMembership(actor, "reo"),
+    getChatClock: currentChatClock,
+    version: MODULE_VERSION
+  };
+
+  game.holophone = api;
+  game.holophoneMessenger = api;
+  await ensureWorldMacro();
+  console.log(`${MODULE_ID} | Ready v${MODULE_VERSION}. Use game.holophone.open()`);
+});

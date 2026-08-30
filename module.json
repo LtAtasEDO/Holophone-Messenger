@@ -1,0 +1,38 @@
+{
+  "id": "holophone",
+  "title": "Holophone/Agent Messenger™",
+  "description": "A Cyberpunk RED Holophone/Agent messenger with themed direct-message cards, private and GM-assigned player contacts, calendar-aware timestamps, role-aware whispers, eb transactions, emergency calls, and CitiNet/Ziggurat broadcasts.",
+  "url": "https://github.com/LtAtasEDO/Bodega-Persistent-Shops",
+  "version": "1.7.1",
+  "authors": [
+    {
+      "name": "Lt Atlas"
+    }
+  ],
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12.343",
+    "maximum": "12"
+  },
+  "relationships": {
+    "systems": [
+      {
+        "id": "cyberpunk-red-core",
+        "type": "system",
+        "compatibility": {
+          "minimum": "0.92.1",
+          "verified": "0.92.4"
+        }
+      }
+    ]
+  },
+  "esmodules": [
+    "scripts/holophone.js"
+  ],
+  "styles": [
+    "styles/holophone.css"
+  ],
+  "manifest": "https://github.com/LtAtasEDO/Holophone-Messenger/releases/latest/download/module.json",
+  "download": "https://github.com/LtAtasEDO/Holophone-Messenger/releases/download/1.7.1/module.zip",
+  "readme": "README.md"
+}
