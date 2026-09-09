@@ -11,9 +11,10 @@ A Foundry VTT 12 module for Cyberpunk RED v0.92.1+ that converts the Holophone/A
 - Lets the GM add an NPC contact to one player or all current players without exposing the rest of the NPC directory.
 - Lets the GM set Corrupted message strength from 0% to 100%.
 - Keeps the world-wide 2045 Mode toggle: Agent/red in 2045 and Holophone/cyan in 2077.
-- Adds public emergency dispatch cards and response rolls.
+- Adds public emergency dispatch cards and GM-configurable response formulas, including service and membership-tier overrides.
 - Gives the GM a custom public-network composer: **CitiNet** in 2077 mode and **Ziggurat** in 2045 mode, each with its own styled chat card.
-- Uses the included unknown-contact artwork for alias-only contacts and messages instead of Foundry's blank white mook silhouette.
+- Uses a recolorable Lucide SVG for alias-only contacts and messages instead of Foundry's blank white mook silhouette or proprietary game artwork.
+- Refreshes the 2077 and 2045 windows with a Choom Trade-inspired dark shell, compact section bars, squared controls, and Holophone/Agent-specific secure-link branding.
 - Renders ordinary messages as dark, high-contrast direct-message cards in the same visual family as CitiNet/Ziggurat feeds: cyan Holophone cards in 2077 and red Agent cards in 2045.
 - Adds a timestamp to every Holophone-generated chat entry. When Simple Calendar is installed and active, the stamp uses its configured in-world date/time; otherwise it uses real local time.
 
@@ -42,7 +43,7 @@ R.E.O. can be called with or without a membership.
 - The module reads the caller's active, carried Gear Items for one food lifestyle and one housing lifestyle.
 - If food + housing is **above 800eb/month**, the Holophone call is free.
 - Otherwise, **5eb** is deducted from the caller's Cyberpunk RED ledger as `R.E.O. Meatwagon Holophone Call Fee`.
-- An active R.E.O. membership uses a `1d6+2` response roll. An uncovered/Cash Call request uses `1d6+3`.
+- By default, an active R.E.O. membership uses a `1d6+2` response roll and an uncovered/Cash Call request uses `1d6+3`.
 - Membership, Cash Call, transport, and hospital fees are not deducted by this module; they remain governed by the R.E.O. policy Item and the GM.
 
 Lifestyle detection follows Diner™ Manager when it is installed. A matching built-in detector is used otherwise. The old actor-level lifestyle block is not used because it may be stale.
@@ -54,7 +55,19 @@ The GM can enable **Skip lifestyle check** in the Emergency Services panel. Whil
 - The call button only activates when the caller owns an active carried Gear Item whose name contains both `Trauma Team` and `Membership`.
 - The tier is read generically from the Item name, so Silver, Executive, and future tiers work without a code update.
 - When several membership Items are active, the highest monthly/market value is used.
-- A successful call posts the tier and rolls the standard `1d6` response time.
+- A successful call posts the tier and rolls its configured response time. The default remains `1d6`.
+
+### Configurable response rules
+
+The GM can open **Response Rules** from the Emergency Services panel. The world-level editor accepts standard dice formulas such as `1d6+2` or `2d6` and provides:
+
+- R.E.O. Uncovered / Cash Call formula.
+- R.E.O. Membership default formula.
+- Optional R.E.O. membership-tier overrides.
+- Trauma Team Membership default for future or unmatched tiers.
+- Editable Silver and Executive tier overrides, plus additional custom tiers.
+
+Tier matching is case-insensitive and checks whether the detected membership tier contains the configured tier text. A matching tier override wins; otherwise the service's membership default is used. **Restore Defaults** returns to the v1.7.1 formulas.
 
 ## Installation
 
@@ -64,7 +77,7 @@ The GM can enable **Skip lifestyle check** in the Emergency Services panel. Whil
 4. Reload the world once.
 
 The active GM receives a **Holophone/Agent Messenger™** launcher Macro automatically.
-Its icon uses `systems/cyberpunk-red-core/icons/compendium/gear/agent.svg`. Existing official launcher Macros are updated in place when v1.7.1 starts, preserving their command and hotbar assignment.
+Its icon uses `systems/cyberpunk-red-core/icons/compendium/gear/agent.svg`. Existing official launcher Macros are updated in place when the module starts, preserving their command and hotbar assignment.
 
 Manual launcher command:
 
@@ -78,6 +91,9 @@ The API also provides:
 game.holophone.open();
 game.holophone.callREO(actor);
 game.holophone.callTrauma(actor);
+game.holophone.openResponseRules();
+game.holophone.getResponseRules();
+game.holophone.resolveResponseFormula("trauma", game.holophone.findTraumaMembership(actor));
 game.holophone.openNetworkComposer();
 game.holophone.postNetworkBroadcast({ headline: "Headline", message: "Message" });
 game.holophone.openContactManager();
@@ -90,7 +106,8 @@ game.holophone.getChatClock();
 ## Notes
 
 - A real owned From actor is required for transfers and emergency calls. An alias-only sender can still send ordinary messages.
-- Entering a From alias uses the module's unknown-contact portrait in the direct-message card, while a sender using their real actor name keeps their available actor portrait. Existing white mystery-man contact icons are upgraded automatically.
+- Entering a From alias uses the module's Lucide unknown-contact SVG in the direct-message card, while a sender using their real actor name keeps their available actor portrait. Existing white mystery-man icons and the removed v1.7.0–1.7.1 WEBP path upgrade automatically.
+- The SVG is recolored through CSS to the active era accent: cyan `#00fff7` in 2077 and red `#e64539` in 2045. See `THIRD_PARTY_NOTICES.md` for its source and ISC license.
 - A player sees only owned Player Characters in **From** and only Player Characters plus their own saved, GM-added, and recent NPC aliases in **To**. The full NPC directory remains GM-only.
 - The GM-only **Manage Contacts** control can add an NPC to one player user or **All Players**. Assigned entries appear under **GM Contacts**, above **Recent Contacts**, in the player dropdown and quick search.
 - GM-added contacts belong only to the targeted player address books. Players can promote them to **Saved Contacts** or remove them; no other NPC names are exposed.
@@ -103,3 +120,11 @@ game.holophone.getChatClock();
 - GMs receive **Whisper to Player** instead. It delivers the message only to the owners of Player Character actors selected in **To**, while keeping the sending GMs in the whisper. Selecting only NPC recipients produces a warning before the message or any ledger action is processed.
 - Private GM-to-player NPC or alias messages still add that sender to the receiving players' recent contacts.
 - Transfer deposits sent to another player are delivered as a one-time private Apply button. Applied transaction receipts are recorded on the recipient actor to prevent repeat clicks.
+
+## Credits and Asset Notice
+
+Created by Lt Atlas for Cyberpunk RED on Foundry VTT, with development assistance from AI.
+
+The bundled terminal icon uses the human-authored Lucide **Circle User Round** icon under the ISC License and is recolored at runtime for the active Holophone/Agent era for presentation purposes. Full attribution and the license text are included in `THIRD_PARTY_NOTICES.md` in asset folder.
+
+This project is unofficial fan tooling and is not affiliated with R. Talsorian Games, Foundry Gaming LLC, or CD PROJEKT RED.
