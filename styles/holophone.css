@@ -5,6 +5,8 @@
   --holophone-panel: #11171b;
   --holophone-text: #eaffff;
   --holophone-muted: #98ced0;
+  --holophone-line: color-mix(in srgb, var(--holophone-accent) 52%, #334047);
+  --holophone-raised: #161d21;
   color: var(--holophone-text) !important;
   max-width: 96vw;
 }
@@ -344,10 +346,12 @@
   text-align: center;
 }
 
-.holophone-pick-item img {
+.holophone-pick-avatar {
   width: 28px;
   height: 28px;
+  display: block;
   object-fit: cover;
+  background: #050708;
   border: 1px solid var(--holophone-accent);
   border-radius: 50%;
 }
@@ -650,6 +654,20 @@
   box-shadow: 0 0 8px color-mix(in srgb, var(--holophone-accent) 28%, transparent);
 }
 
+.holophone-alias-avatar {
+  position: relative;
+  overflow: hidden;
+}
+
+.holophone-alias-avatar::before {
+  position: absolute;
+  inset: 13%;
+  content: "";
+  background: var(--holophone-accent);
+  -webkit-mask: url("../assets/unknown-contact.svg") center / contain no-repeat;
+  mask: url("../assets/unknown-contact.svg") center / contain no-repeat;
+}
+
 .holophone-message-heading-text {
   min-width: 0;
 }
@@ -726,6 +744,363 @@
   text-align: right;
 }
 
+/* v1.8 beta: Choom Trade-inspired shell with a dedicated personal-link identity. */
+.holophone-dialog .window-header {
+  min-height: 34px;
+  background: #080c0e !important;
+  border: 1px solid var(--holophone-accent) !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: inset 0 3px 0 var(--holophone-hover);
+}
+
+.holophone-dialog .window-header::before {
+  width: 8px;
+  align-self: stretch;
+  margin: -5px 5px -5px -5px;
+  content: "";
+  background: var(--holophone-accent);
+}
+
+.holophone-dialog .window-content {
+  padding: 12px !important;
+  background-color: #070a0c !important;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--holophone-accent) 9%, transparent), transparent 34%) !important;
+  background-size: 22px 22px, 22px 22px, auto !important;
+  border: 1px solid var(--holophone-accent) !important;
+  border-top: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: inset 5px 0 0 color-mix(in srgb, var(--holophone-accent) 24%, transparent);
+}
+
+.holophone-shell {
+  gap: 12px;
+  font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif;
+}
+
+.holophone-header {
+  position: relative;
+  min-height: 76px;
+  gap: 14px;
+  padding: 12px 14px;
+  overflow: hidden;
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--holophone-accent) 13%, transparent), transparent 46%),
+    #11171b;
+  border: 1px solid var(--holophone-line);
+  border-top: 4px solid var(--holophone-hover);
+  border-left: 6px solid var(--holophone-accent);
+  border-radius: 0;
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.42);
+}
+
+.holophone-header::after {
+  position: absolute;
+  right: -24px;
+  bottom: -34px;
+  width: 110px;
+  height: 78px;
+  content: "";
+  pointer-events: none;
+  background: repeating-linear-gradient(-45deg, transparent 0 8px, color-mix(in srgb, var(--holophone-accent) 22%, transparent) 8px 11px);
+  transform: skewX(-18deg);
+}
+
+.holophone-logo {
+  width: 54px;
+  height: 54px;
+  flex-basis: 54px;
+  color: #071011;
+  background: var(--holophone-accent);
+  border: 0;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 color-mix(in srgb, var(--holophone-hover) 78%, #000);
+}
+
+.holophone-brand-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.holophone-brand-kicker {
+  margin-bottom: 3px;
+  color: var(--holophone-hover);
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+}
+
+.holophone-title {
+  font-size: 23px;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--holophone-accent) 34%, transparent);
+}
+
+.holophone-subtitle {
+  margin-top: 3px;
+  letter-spacing: 0.025em;
+}
+
+.holophone-mode-chip {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: var(--holophone-hover);
+  background: #070a0c;
+  border: 1px solid var(--holophone-accent);
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
+.holophone-card {
+  position: relative;
+  padding: 12px;
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--holophone-accent) 5%, transparent), transparent 38%),
+    var(--holophone-panel);
+  border: 1px solid var(--holophone-line);
+  border-left: 4px solid var(--holophone-accent);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.28);
+}
+
+.holophone-label,
+.holophone-section-title {
+  color: var(--holophone-accent);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.holophone-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px -12px 11px;
+  padding: 7px 10px;
+  color: #071011;
+  background: var(--holophone-accent);
+}
+
+.holophone-section-title::after {
+  height: 1px;
+  flex: 1 1 auto;
+  content: "";
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.holophone-shell input,
+.holophone-shell select,
+.holophone-shell textarea,
+.holophone-pick-display,
+.holophone-pick-menu {
+  border-radius: 2px !important;
+}
+
+.holophone-shell input,
+.holophone-shell select,
+.holophone-shell textarea {
+  background: #080c0e !important;
+  border-color: color-mix(in srgb, var(--holophone-accent) 68%, #26343a) !important;
+}
+
+.holophone-shell input:focus,
+.holophone-shell select:focus,
+.holophone-shell textarea:focus {
+  background: #0c1215 !important;
+  box-shadow: inset 3px 0 0 var(--holophone-accent) !important;
+}
+
+.holophone-pick-display {
+  background: #080c0e;
+}
+
+.holophone-pick-menu {
+  border-width: 1px;
+  border-left-width: 4px;
+  box-shadow: 6px 8px 0 rgba(0, 0, 0, 0.62);
+}
+
+.holophone-pick-heading {
+  color: #071011;
+  letter-spacing: 0.12em;
+}
+
+.holophone-chip,
+.holophone-check {
+  border-radius: 2px;
+}
+
+.holophone-chip {
+  background: color-mix(in srgb, var(--holophone-accent) 11%, #080c0e);
+}
+
+.holophone-check {
+  background: #090d10;
+  border-color: color-mix(in srgb, var(--holophone-accent) 62%, #26343a);
+}
+
+.holophone-btn,
+.holophone-chat-card button {
+  border-width: 1px !important;
+  border-radius: 2px !important;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.holophone-btn:hover:not([disabled]),
+.holophone-btn:focus:not([disabled]),
+.holophone-chat-card button:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--holophone-accent) 12%, #090d10) !important;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--holophone-hover) 45%, transparent) !important;
+}
+
+.holophone-send {
+  min-height: 42px !important;
+  border: 0 !important;
+  border-left: 7px solid var(--holophone-hover) !important;
+  border-radius: 0 !important;
+  font-size: 14px;
+  letter-spacing: 0.09em;
+}
+
+.holophone-emergency-panel {
+  background:
+    linear-gradient(120deg, rgba(230, 69, 57, 0.13), transparent 44%),
+    var(--holophone-panel);
+}
+
+.holophone-network-panel {
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--holophone-accent) 11%, transparent), transparent 44%),
+    var(--holophone-panel);
+}
+
+.holophone-service {
+  min-height: 76px;
+  background: #0a0f12;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 3px solid color-mix(in srgb, var(--holophone-accent) 70%, transparent);
+  border-radius: 0;
+}
+
+.holophone-emergency-controls {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 7px;
+}
+
+.holophone-emergency-mode {
+  margin-top: 0;
+}
+
+.holophone-btn-response-rules {
+  min-height: 34px !important;
+}
+
+.holophone-rule-basics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.holophone-rule-basics-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.holophone-tier-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 13px;
+  color: var(--holophone-hover);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.holophone-tier-heading .holophone-btn {
+  min-width: 0;
+  min-height: 30px !important;
+  padding: 4px 8px !important;
+  font-size: 10px;
+}
+
+.holophone-tier-columns,
+.holophone-tier-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 30px;
+  align-items: center;
+  gap: 7px;
+}
+
+.holophone-tier-columns {
+  margin-top: 8px;
+  padding: 0 4px 3px;
+  color: var(--holophone-muted);
+  font-family: monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.holophone-tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.holophone-tier-rule {
+  padding: 6px;
+  background: #090d10;
+  border-left: 2px solid var(--holophone-accent);
+}
+
+.holophone-tier-rule .holophone-contact-action {
+  width: 30px !important;
+  height: 30px !important;
+}
+
+.holophone-rule-actions {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.65fr) minmax(240px, 1.35fr);
+  gap: 8px;
+}
+
+.holophone-rule-actions .holophone-btn {
+  width: 100% !important;
+}
+
+.holophone-chat-card {
+  border-width: 1px;
+  border-left-width: 4px;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.28);
+}
+
+.holophone-network-card::after {
+  border-top-width: 5px;
+  border-right-width: 5px;
+}
+
+.holophone-message-avatar {
+  border-radius: 0;
+}
+
 @media (max-width: 760px) {
   .holophone-shell {
     min-width: 0;
@@ -733,7 +1108,28 @@
 
   .holophone-grid-2,
   .holophone-emergency-grid,
-  .holophone-contact-manager-grid {
+  .holophone-contact-manager-grid,
+  .holophone-rule-basics,
+  .holophone-rule-actions {
     grid-template-columns: 1fr;
+  }
+
+  .holophone-header {
+    align-items: flex-start;
+  }
+
+  .holophone-mode-chip {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+
+  .holophone-brand-copy {
+    padding-right: 62px;
+  }
+
+  .holophone-tier-columns,
+  .holophone-tier-rule {
+    grid-template-columns: minmax(0, 1fr) 112px 30px;
   }
 }
