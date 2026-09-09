@@ -1,5 +1,5 @@
 const MODULE_ID = "holophone";
-const MODULE_VERSION = "1.7.1";
+const MODULE_VERSION = "1.8.0";
 const PREF_FLAG = "icMessengerPrefs.v2";
 const RECEIPT_FLAG = "transactionReceipts";
 const PLAYER_CONTACT_FLAG = "playerContactBook.v1";
@@ -8,10 +8,24 @@ const MAX_PLAYER_CONTACTS = 100;
 const ERA_2045 = "#e64539";
 const ERA_2077 = "#00fff7";
 const HOVER = "#ffdd00";
-const ALIAS_PORTRAIT = "modules/holophone/assets/unknown-contact.webp";
+const ALIAS_PORTRAIT = "modules/holophone/assets/unknown-contact.svg";
 const LAUNCHER_ICON = "systems/cyberpunk-red-core/icons/compendium/gear/agent.svg";
 const REO_CALL_FEE = 5;
 const REO_FREE_THRESHOLD = 800;
+const DEFAULT_RESPONSE_RULES = {
+  reo: {
+    uncovered: "1d6+3",
+    membership: "1d6+2",
+    tiers: []
+  },
+  trauma: {
+    membership: "1d6",
+    tiers: [
+      { match: "Silver", formula: "1d6" },
+      { match: "Executive", formula: "1d6" }
+    ]
+  }
+};
 const RESERVED_NETWORK_CONTACT_ALIASES = new Set([
   "citinet",
   "citinet broadcast",
@@ -75,10 +89,25 @@ function isReservedNetworkContactAlias(value = "") {
   return RESERVED_NETWORK_CONTACT_ALIASES.has(normalize(value));
 }
 
+function isAliasPortrait(value = "") {
+  const portrait = String(value ?? "").trim();
+  return !portrait
+    || /(^|\/)icons\/svg\/mystery-man\.svg(?:$|[?#])/i.test(portrait)
+    || /(^|\/)modules\/holophone\/assets\/unknown-contact\.(?:webp|svg)(?:$|[?#])/i.test(portrait);
+}
+
 function contactPortrait(value = "") {
   const portrait = String(value ?? "").trim();
-  if (!portrait || /(^|\/)icons\/svg\/mystery-man\.svg(?:$|[?#])/i.test(portrait)) return ALIAS_PORTRAIT;
+  if (isAliasPortrait(portrait)) return ALIAS_PORTRAIT;
   return portrait;
+}
+
+function contactPortraitHTML(value = "", className = "", alt = "") {
+  const portrait = contactPortrait(value);
+  if (portrait === ALIAS_PORTRAIT) {
+    return `<span class="${esc(className)} holophone-alias-avatar" role="img" aria-label="${esc(alt || "Unknown contact")}"></span>`;
+  }
+  return `<img class="${esc(className)}" src="${esc(portrait)}" alt="${esc(alt)}">`;
 }
 
 function aliasPortrait(actor = null, alias = "", forceAlias = false) {
@@ -100,6 +129,70 @@ function currentTerm() {
 
 function skipLifestyleChecks() {
   return game.settings.get(MODULE_ID, "skipLifestyleChecks");
+}
+
+function validResponseFormula(value) {
+  const formula = String(value ?? "").trim();
+  if (!formula || formula.length > 64 || !/^[0-9dD+\-*/()\s]+$/.test(formula)) return false;
+  try {
+    return typeof Roll.validate === "function" ? Boolean(Roll.validate(formula)) : Boolean(new Roll(formula));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function responseFormulaOr(value, fallback) {
+  const formula = String(value ?? "").trim();
+  return validResponseFormula(formula) ? formula : fallback;
+}
+
+function normalizeTierRules(value, fallback = []) {
+  const source = Array.isArray(value) ? value : fallback;
+  const seen = new Set();
+  return source.map((entry) => {
+    const match = String(entry?.match ?? "").trim().slice(0, 80);
+    const key = normalize(match);
+    const formula = String(entry?.formula ?? "").trim();
+    if (!key || seen.has(key) || !validResponseFormula(formula)) return null;
+    seen.add(key);
+    return { match, formula };
+  }).filter(Boolean);
+}
+
+function normalizeResponseRules(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const defaults = DEFAULT_RESPONSE_RULES;
+  return {
+    reo: {
+      uncovered: responseFormulaOr(source.reo?.uncovered, defaults.reo.uncovered),
+      membership: responseFormulaOr(source.reo?.membership, defaults.reo.membership),
+      tiers: normalizeTierRules(source.reo?.tiers, defaults.reo.tiers)
+    },
+    trauma: {
+      membership: responseFormulaOr(source.trauma?.membership, defaults.trauma.membership),
+      tiers: normalizeTierRules(source.trauma?.tiers, defaults.trauma.tiers)
+    }
+  };
+}
+
+function responseRules() {
+  return normalizeResponseRules(game.settings.get(MODULE_ID, "responseRules"));
+}
+
+function resolveResponseFormula(service, membership = null) {
+  const rules = responseRules();
+  const serviceRules = service === "trauma" ? rules.trauma : rules.reo;
+  if (service === "reo" && !membership) {
+    return { formula: serviceRules.uncovered, source: "uncovered", match: "" };
+  }
+
+  const tier = normalize(membership?.tier);
+  const override = [...serviceRules.tiers]
+    .sort((a, b) => normalize(b.match).length - normalize(a.match).length)
+    .find((entry) => tier && tier.includes(normalize(entry.match)));
+  return override
+    ? { formula: override.formula, source: "tier", match: override.match }
+    : { formula: serviceRules.membership, source: "membership", match: "" };
 }
 
 function networkIdentity(era2045 = game.settings.get(MODULE_ID, "era2045")) {
@@ -713,7 +806,7 @@ function messengerCard({
       <div class="holophone-network-scanline"></div>
       <div class="holophone-chat-kicker"><i class="fas fa-comment-dots"></i> ${esc(term.toUpperCase())} // DIRECT MESSAGE</div>
       <div class="holophone-message-heading">
-        <img class="holophone-message-avatar" src="${esc(contactPortrait(portrait))}" alt="">
+        ${contactPortraitHTML(portrait, "holophone-message-avatar", `${senderAlias} contact portrait`)}
         <div class="holophone-message-heading-text">
           <div class="holophone-chat-title">${esc(senderAlias)}</div>
           <div class="holophone-message-route"><span>TO //</span> ${esc(recipientText)}</div>
@@ -796,10 +889,12 @@ async function openNetworkComposer() {
     <div class="holophone-shell holophone-network-shell">
       <div class="holophone-header">
         <div class="holophone-logo"><i class="fas fa-tower-broadcast"></i></div>
-        <div>
+        <div class="holophone-brand-copy">
+          <div class="holophone-brand-kicker">PUBLIC NETWORK // BROADCAST UPLINK</div>
           <div class="holophone-title holophone-network-composer-title">${esc(identity.name)} Broadcast</div>
           <div class="holophone-subtitle">Post a styled public message to the chat log.</div>
         </div>
+        <div class="holophone-mode-chip" data-era-label>${identity.era} FEED</div>
       </div>
       <div class="holophone-card">
         <div class="holophone-label">Headline <span class="holophone-muted">(optional)</span></div>
@@ -874,6 +969,176 @@ async function openNetworkComposer() {
   return dialog;
 }
 
+function tierRuleRowHTML(service, entry = {}) {
+  return `
+    <div class="holophone-tier-rule" data-service="${esc(service)}">
+      <input type="text" class="holophone-tier-match" maxlength="80" placeholder="Tier name contains…" value="${esc(entry.match ?? "")}">
+      <input type="text" class="holophone-tier-formula" maxlength="64" placeholder="1d6+2 or 2d6" value="${esc(entry.formula ?? "1d6")}">
+      <button type="button" class="holophone-contact-action holophone-remove-tier" title="Remove tier override" aria-label="Remove tier override">
+        <i class="fas fa-trash"></i>
+      </button>
+    </div>`;
+}
+
+function responseRulesFromDialog(root) {
+  const readFormula = (selector, label) => {
+    const formula = String(root.querySelector(selector)?.value ?? "").trim();
+    if (!validResponseFormula(formula)) throw new Error(`${label} must be a valid dice formula such as 1d6+2 or 2d6.`);
+    return formula;
+  };
+  const readTiers = (service) => {
+    const seen = new Set();
+    return [...root.querySelectorAll(`.holophone-tier-rule[data-service="${service}"]`)].map((row) => {
+      const match = String(row.querySelector(".holophone-tier-match")?.value ?? "").trim();
+      const formula = String(row.querySelector(".holophone-tier-formula")?.value ?? "").trim();
+      if (!match) throw new Error(`${service === "trauma" ? "Trauma Team" : "R.E.O."} tier overrides need a tier name.`);
+      const key = normalize(match);
+      if (seen.has(key)) throw new Error(`The tier override “${match}” appears more than once.`);
+      if (!validResponseFormula(formula)) throw new Error(`${match} must use a valid dice formula such as 1d6+2 or 2d6.`);
+      seen.add(key);
+      return { match: match.slice(0, 80), formula };
+    });
+  };
+
+  return {
+    reo: {
+      uncovered: readFormula(".holophone-reo-uncovered-formula", "R.E.O. Uncovered / Cash Call"),
+      membership: readFormula(".holophone-reo-membership-formula", "R.E.O. Membership Default"),
+      tiers: readTiers("reo")
+    },
+    trauma: {
+      membership: readFormula(".holophone-trauma-membership-formula", "Trauma Team Membership Default"),
+      tiers: readTiers("trauma")
+    }
+  };
+}
+
+async function openResponseRules() {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can configure emergency response rolls.");
+  const rules = responseRules();
+  const content = `
+    <div class="holophone-shell holophone-rules-shell">
+      <div class="holophone-header">
+        <div class="holophone-logo"><i class="fas fa-dice"></i></div>
+        <div class="holophone-brand-copy">
+          <div class="holophone-brand-kicker">DISPATCH CONTROL // WORLD RULES</div>
+          <div class="holophone-title">Emergency Response Rules</div>
+          <div class="holophone-subtitle">Set any standard dice formula, including 1d6 + a modifier or 2d6.</div>
+        </div>
+        <div class="holophone-mode-chip">GM ONLY</div>
+      </div>
+
+      <div class="holophone-card holophone-rule-card">
+        <div class="holophone-section-title">R.E.O. Meatwagon</div>
+        <div class="holophone-rule-basics">
+          <label class="holophone-field">
+            <span class="holophone-label">Uncovered / Cash Call</span>
+            <input type="text" class="holophone-reo-uncovered-formula" maxlength="64" value="${esc(rules.reo.uncovered)}">
+          </label>
+          <label class="holophone-field">
+            <span class="holophone-label">Membership Default</span>
+            <input type="text" class="holophone-reo-membership-formula" maxlength="64" value="${esc(rules.reo.membership)}">
+          </label>
+        </div>
+        <div class="holophone-tier-heading">
+          <span>Optional Tier Overrides</span>
+          <button type="button" class="holophone-btn holophone-add-tier" data-service="reo"><i class="fas fa-plus"></i> Add R.E.O. Tier</button>
+        </div>
+        <div class="holophone-tier-columns"><span>Tier name contains</span><span>Response formula</span><span></span></div>
+        <div class="holophone-tier-list" data-service="reo">${rules.reo.tiers.map((entry) => tierRuleRowHTML("reo", entry)).join("")}</div>
+        <div class="holophone-muted">A matching tier overrides the membership default. Uncovered callers always use the Cash Call formula.</div>
+      </div>
+
+      <div class="holophone-card holophone-rule-card">
+        <div class="holophone-section-title">Trauma Team</div>
+        <div class="holophone-rule-basics holophone-rule-basics-single">
+          <label class="holophone-field">
+            <span class="holophone-label">Membership Default / Future Tiers</span>
+            <input type="text" class="holophone-trauma-membership-formula" maxlength="64" value="${esc(rules.trauma.membership)}">
+          </label>
+        </div>
+        <div class="holophone-tier-heading">
+          <span>Tier Overrides</span>
+          <button type="button" class="holophone-btn holophone-add-tier" data-service="trauma"><i class="fas fa-plus"></i> Add Trauma Tier</button>
+        </div>
+        <div class="holophone-tier-columns"><span>Tier name contains</span><span>Response formula</span><span></span></div>
+        <div class="holophone-tier-list" data-service="trauma">${rules.trauma.tiers.map((entry) => tierRuleRowHTML("trauma", entry)).join("")}</div>
+        <div class="holophone-muted">Silver and Executive begin at 1d6 to preserve v1.7.1 behavior. Add or rename rows for any future membership tier.</div>
+      </div>
+
+      <div class="holophone-rule-actions">
+        <button type="button" class="holophone-btn holophone-reset-response"><i class="fas fa-rotate-left"></i> Restore Defaults</button>
+        <button type="button" class="holophone-btn holophone-send holophone-save-response"><i class="fas fa-floppy-disk"></i> Save Response Rules</button>
+      </div>
+      <div class="holophone-muted holophone-tip">Tier matching is case-insensitive and uses the membership name detected on the caller.</div>
+    </div>`;
+
+  let dialog = null;
+  let busy = false;
+  dialog = new Dialog({
+    title: "Emergency Response Rules",
+    content,
+    buttons: {},
+    render: (html) => {
+      const app = html[0].closest(".app");
+      applyDialogTheme(app, undefined, "rules");
+      const root = html[0].querySelector(".holophone-rules-shell");
+      const saveButton = root.querySelector(".holophone-save-response");
+      const resetButton = root.querySelector(".holophone-reset-response");
+
+      root.addEventListener("click", async (event) => {
+        const addButton = event.target.closest(".holophone-add-tier");
+        if (addButton) {
+          const service = addButton.dataset.service;
+          root.querySelector(`.holophone-tier-list[data-service="${service}"]`)
+            ?.insertAdjacentHTML("beforeend", tierRuleRowHTML(service));
+          return;
+        }
+        const removeButton = event.target.closest(".holophone-remove-tier");
+        if (removeButton) removeButton.closest(".holophone-tier-rule")?.remove();
+      });
+
+      const save = async () => {
+        if (busy) return;
+        busy = true;
+        saveButton.disabled = true;
+        try {
+          const next = responseRulesFromDialog(root);
+          await game.settings.set(MODULE_ID, "responseRules", next);
+          ui.notifications.info("Emergency response rules saved.");
+          dialog.close();
+        } catch (error) {
+          ui.notifications.warn(error.message ?? "The response rules could not be saved.");
+        } finally {
+          busy = false;
+          saveButton.disabled = false;
+        }
+      };
+
+      saveButton.addEventListener("click", save);
+      resetButton.addEventListener("click", async () => {
+        const confirmed = await Dialog.confirm({
+          title: "Restore Emergency Response Defaults?",
+          content: "<p>This restores the v1.7.1 response formulas and the Silver/Executive tier rows.</p>",
+          yes: () => true,
+          no: () => false,
+          defaultYes: false
+        });
+        if (!confirmed) return;
+        await game.settings.set(MODULE_ID, "responseRules", duplicate(DEFAULT_RESPONSE_RULES));
+        ui.notifications.info("Emergency response defaults restored.");
+        dialog.close();
+      });
+      root.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") save();
+      });
+    }
+  }, { width: 700, height: "auto", resizable: true });
+
+  dialog.render(true);
+  return dialog;
+}
+
 async function callREO(actor) {
   if (!actor) return ui.notifications.warn("Select a real caller in From first.");
   if (!canUseActor(actor)) return ui.notifications.warn(`You must own ${actor.name} to place this call.`);
@@ -886,7 +1151,8 @@ async function callREO(actor) {
 
   const membership = findMembership(actor, "reo");
   const coverage = membership ? `${membership.tier} Membership` : "Uncovered / Cash Call";
-  const formula = membership ? "1d6+2" : "1d6+3";
+  const response = resolveResponseFormula("reo", membership);
+  const formula = response.formula;
   const feeText = waived
     ? `Waived — food + housing ${lifestyleTotal}eb/month`
     : lifestyleSkipped
@@ -899,6 +1165,7 @@ async function callREO(actor) {
       <div class="holophone-confirm">
         <p><b>Caller:</b> ${esc(actor.name)}</p>
         <p><b>Coverage:</b> ${esc(coverage)}</p>
+        <p><b>Response:</b> ${esc(formula)} Rounds</p>
         ${lifestyleSkipped
           ? `<p><b>Lifestyle check:</b> Disabled by GM</p>`
           : `<p><b>Food + housing:</b> ${lifestyleTotal}eb/month</p>`}
@@ -933,6 +1200,11 @@ async function callREO(actor) {
         emergency: {
           service: "reo",
           actorUuid: actor.uuid,
+          membershipUuid: membership?.item?.uuid ?? "",
+          membershipTier: membership?.tier ?? "",
+          formula,
+          responseRule: response.source,
+          responseTierMatch: response.match,
           waived,
           lifestyle: lifestyleTotal,
           lifestyleCheckSkipped: lifestyleSkipped
@@ -951,6 +1223,8 @@ async function callTrauma(actor) {
 
   const membership = findMembership(actor, "trauma");
   if (!membership) return ui.notifications.warn(`${actor.name} does not have an active Trauma Team membership.`);
+  const response = resolveResponseFormula("trauma", membership);
+  const formula = response.formula;
 
   const confirmed = await Dialog.confirm({
     title: "Call Trauma Team?",
@@ -958,7 +1232,7 @@ async function callTrauma(actor) {
       <div class="holophone-confirm">
         <p><b>Caller:</b> ${esc(actor.name)}</p>
         <p><b>Membership:</b> ${esc(membership.tier)}</p>
-        <p><b>Response:</b> 1d6 Rounds</p>
+        <p><b>Response:</b> ${esc(formula)} Rounds</p>
       </div>`,
     yes: () => true,
     no: () => false,
@@ -966,7 +1240,6 @@ async function callTrauma(actor) {
   });
   if (!confirmed) return false;
 
-  const formula = "1d6";
   const roll = await new Roll(formula).evaluate();
   const clock = currentChatClock();
   await ChatMessage.create({
@@ -985,7 +1258,15 @@ async function callTrauma(actor) {
     rolls: [roll],
     flags: {
       [MODULE_ID]: {
-        emergency: { service: "trauma", actorUuid: actor.uuid, membershipUuid: membership.item.uuid },
+        emergency: {
+          service: "trauma",
+          actorUuid: actor.uuid,
+          membershipUuid: membership.item.uuid,
+          membershipTier: membership.tier,
+          formula,
+          responseRule: response.source,
+          responseTierMatch: response.match
+        },
         clock: chatClockFlag(clock)
       }
     }
@@ -1063,7 +1344,7 @@ function groupedPickerMenu(entries, selectedKeys = []) {
       ${groupEntries.map((entry) => `
         <div class="holophone-pick-item ${selected.has(entry.key) ? "selected" : ""} ${entry.unavailable ? "unavailable" : ""}"
              data-entry-key="${esc(entry.key)}" role="button" tabindex="0">
-          <img src="${esc(entry.img)}">
+          ${contactPortraitHTML(entry.img, "holophone-pick-avatar", `${entry.name} contact portrait`)}
           <span class="holophone-pick-name">
             <b>${esc(entry.name)}</b>
             ${entry.kind === "contact" ? `<small>${entry.saved ? "Saved contact" : entry.source === "gm" ? "Added by GM" : "Recent contact"}${entry.unavailable ? " · Unavailable" : ""}</small>` : ""}
@@ -1274,10 +1555,12 @@ async function openContactManager() {
     <div class="holophone-shell holophone-contact-manager-shell">
       <div class="holophone-header">
         <div class="holophone-logo"><i class="fas fa-address-book"></i></div>
-        <div>
+        <div class="holophone-brand-copy">
+          <div class="holophone-brand-kicker">DIRECTORY CONTROL // PRIVATE ACCESS</div>
           <div class="holophone-title">Player Contact Access</div>
           <div class="holophone-subtitle">Add an NPC to one player's or every player's private directory.</div>
         </div>
+        <div class="holophone-mode-chip">GM ONLY</div>
       </div>
       <div class="holophone-card">
         ${pickerHTML("NPC Contact", "Search NPCs…", [], false)}
@@ -1393,10 +1676,15 @@ function applyDialogTheme(app, era2045 = game.settings.get(MODULE_ID, "era2045")
   const dialogKind = kind ?? element.dataset.holophoneDialogKind ?? "messenger";
   element.dataset.holophoneDialogKind = dialogKind;
   element.style.setProperty("--holophone-accent", era2045 ? ERA_2045 : ERA_2077);
+  element.dataset.holophoneEra = era2045 ? "2045" : "2077";
+  for (const label of element.querySelectorAll(".holophone-mode-chip[data-era-label]")) {
+    label.textContent = `${era2045 ? "2045" : "2077"} ${dialogKind === "network" ? "FEED" : "LINK"}`;
+  }
   const title = element.querySelector(".window-title");
   if (title) {
     if (dialogKind === "network") title.textContent = `Compose ${networkIdentity(era2045).name} Broadcast`;
     else if (dialogKind === "contacts") title.textContent = "Manage Player Contacts";
+    else if (dialogKind === "rules") title.textContent = "Emergency Response Rules";
     else title.textContent = `${era2045 ? "Agent" : "Holophone"} Messenger`;
   }
 }
@@ -1426,10 +1714,12 @@ async function openMessenger(input = null) {
     <div class="holophone-shell">
       <div class="holophone-header">
         <div class="holophone-logo"><i class="fas fa-mobile-screen-button"></i></div>
-        <div>
+        <div class="holophone-brand-copy">
+          <div class="holophone-brand-kicker">SECURE PERSONAL LINK // ENCRYPTED</div>
           <div class="holophone-title">${esc(currentTerm())} Messenger</div>
           <div class="holophone-subtitle holophone-messenger-subtitle">${esc(networkIdentity().name)} messaging, transfers, and emergency dispatch</div>
         </div>
+        <div class="holophone-mode-chip" data-era-label>${game.settings.get(MODULE_ID, "era2045") ? "2045" : "2077"} LINK</div>
       </div>
 
       <div class="holophone-grid-2">
@@ -1494,10 +1784,15 @@ async function openMessenger(input = null) {
           </div>
         </div>
         ${game.user.isGM ? `
-          <label class="holophone-check holophone-emergency-mode">
-            <input type="checkbox" class="holophone-skip-lifestyle" ${skipLifestyleChecks() ? "checked" : ""}>
-            Skip lifestyle check
-          </label>
+          <div class="holophone-emergency-controls">
+            <label class="holophone-check holophone-emergency-mode">
+              <input type="checkbox" class="holophone-skip-lifestyle" ${skipLifestyleChecks() ? "checked" : ""}>
+              Skip lifestyle check
+            </label>
+            <button type="button" class="holophone-btn holophone-btn-response-rules">
+              <i class="fas fa-dice"></i> Response Rules
+            </button>
+          </div>
           <div class="holophone-muted">R.E.O. uses its flat 5eb call fee while enabled. Trauma Team membership rules are unchanged.</div>` : ""}
       </div>
 
@@ -1572,6 +1867,7 @@ async function openMessenger(input = null) {
       const allPlayers = query(".holophone-all-players");
       const reoButton = query(".holophone-btn-reo");
       const traumaButton = query(".holophone-btn-trauma");
+      const responseRulesButton = query(".holophone-btn-response-rules");
       const networkButton = query(".holophone-btn-network");
       const contactManagerButton = query(".holophone-btn-contact-manager");
       const networkName = query(".holophone-network-name");
@@ -1596,17 +1892,20 @@ async function openMessenger(input = null) {
         }
 
         const lifestyleSkipped = skipLifestyleChecks();
+        const reoMembership = findMembership(actor, "reo");
+        const reoFormula = resolveResponseFormula("reo", reoMembership).formula;
         if (lifestyleSkipped) {
-          reoStatus.textContent = `${REO_CALL_FEE}eb flat call · lifestyle check disabled`;
+          reoStatus.textContent = `${REO_CALL_FEE}eb flat call · ETA ${reoFormula} rounds`;
         } else {
           const lifestyle = inspectLifestyle(actor);
           const waived = lifestyle.totalMonthly > REO_FREE_THRESHOLD;
-          reoStatus.textContent = `${waived ? "Free call" : `${REO_CALL_FEE}eb call`} · food + housing ${lifestyle.totalMonthly}eb/month`;
+          reoStatus.textContent = `${waived ? "Free call" : `${REO_CALL_FEE}eb call`} · ETA ${reoFormula} rounds · lifestyle ${lifestyle.totalMonthly}eb/month`;
         }
         reoButton.disabled = !usable;
 
         const membership = findMembership(actor, "trauma");
-        traumaStatus.textContent = membership ? `${membership.tier} membership detected` : "No active membership detected";
+        const traumaFormula = membership ? resolveResponseFormula("trauma", membership).formula : "";
+        traumaStatus.textContent = membership ? `${membership.tier} membership · ETA ${traumaFormula} rounds` : "No active membership detected";
         traumaButton.disabled = !usable || !membership;
       }
 
@@ -1638,6 +1937,8 @@ async function openMessenger(input = null) {
           await game.settings.set(MODULE_ID, "skipLifestyleChecks", skipLifestyleToggle.checked);
         });
       }
+
+      responseRulesButton?.addEventListener("click", () => openResponseRules());
 
       reoButton.addEventListener("click", async () => {
         if (busy) return;
@@ -1885,6 +2186,7 @@ async function openMessenger(input = null) {
         updateEmergencyStatus();
       };
       Hooks.on("holophone-skipLifestyleChecks-changed", emergencyRulesHook);
+      Hooks.on("holophone-responseRules-changed", emergencyRulesHook);
       updateEmergencyStatus();
       updateNetworkLabels();
     },
@@ -1892,6 +2194,7 @@ async function openMessenger(input = null) {
       for (const fn of cleanup) fn();
       if (eraHook) Hooks.off("holophone-era2045-changed", eraHook);
       if (emergencyRulesHook) Hooks.off("holophone-skipLifestyleChecks-changed", emergencyRulesHook);
+      if (emergencyRulesHook) Hooks.off("holophone-responseRules-changed", emergencyRulesHook);
       if (playerContactHook) Hooks.off("updateUser", playerContactHook);
     }
   }, { width: 760, height: "auto", resizable: true });
@@ -1947,6 +2250,15 @@ Hooks.once("init", () => {
     default: false,
     onChange: (value) => Hooks.callAll("holophone-skipLifestyleChecks-changed", value)
   });
+  game.settings.register(MODULE_ID, "responseRules", {
+    name: "Emergency Response Rules",
+    hint: "World-level R.E.O. and Trauma Team response formulas, including optional membership-tier overrides.",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: duplicate(DEFAULT_RESPONSE_RULES),
+    onChange: (value) => Hooks.callAll("holophone-responseRules-changed", value)
+  });
   game._holoEraReg = true;
 });
 
@@ -1970,6 +2282,9 @@ Hooks.once("ready", async () => {
     openMessenger,
     callREO,
     callTrauma,
+    openResponseRules,
+    getResponseRules: responseRules,
+    resolveResponseFormula,
     openNetworkComposer,
     postNetworkBroadcast,
     openContactManager,
@@ -1986,3 +2301,4 @@ Hooks.once("ready", async () => {
   await ensureWorldMacro();
   console.log(`${MODULE_ID} | Ready v${MODULE_VERSION}. Use game.holophone.open()`);
 });
+
