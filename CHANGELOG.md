@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.8.0
+
+- Promoted v1.8.0-beta.1 to stable after successful live GM and player validation.
+- Confirmed the refreshed 2077 player and GM interfaces, Response Rules editor, direct-message cards, R.E.O. dispatch, Trauma Team Silver/Executive dispatch, and Simple Calendar world timestamps in Foundry VTT 12.343.
+- No functional changes from the validated beta candidate.
+
+## 1.8.0-beta.1
+
+- Started a beta line from the stable v1.7.1 checkpoint for live GM/player validation.
+- Removed the proprietary `unknown-contact.webp` asset from the package.
+- Added a lightweight Lucide **Circle User Round** SVG under the ISC License, with the complete attribution and license terms in `THIRD_PARTY_NOTICES.md`.
+- Recolored the alias SVG at runtime to cyan `#00fff7` in 2077 and red `#e64539` in 2045.
+- Migrated saved/recent/GM-added contacts that still reference either Foundry's mystery-man icon or the removed WEBP to the new SVG.
+- Refreshed the 2077/2045 windows with a Choom Trade-inspired dark, squared interface while retaining Holophone/Agent secure-link branding and era colors.
+- Added a GM-only **Response Rules** editor to Emergency Services.
+- Made R.E.O. Uncovered, R.E.O. Membership, and Trauma Team Membership response formulas world-configurable.
+- Added optional case-insensitive tier overrides for both R.E.O. and Trauma Team memberships; Silver and Executive ship as editable Trauma Team rows.
+- Preserved v1.7.1 response defaults: R.E.O. Membership `1d6+2`, R.E.O. Uncovered `1d6+3`, and Trauma Team `1d6`.
+- Added the resolved response formula, rule source, and matched tier to emergency chat flags for auditing.
+
 ## 1.7.1
 
 - Changed the official Holophone/Agent Messenger launcher Macro icon from Foundry's generic `sound.svg` to the Cyberpunk RED Agent gear icon.
