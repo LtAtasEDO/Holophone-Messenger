@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.0
+
+- Promoted v1.9.0-beta.2 to stable after live GM and player validation in Foundry VTT 12.343.
+- Confirmed GM-assigned Player Character and NPC contacts synchronize to the targeted player interface while preserving existing NPC, Recent, Saved, and player-added contacts.
+- Confirmed Datapool and locally named food/housing lifestyles total correctly and grant the R.E.O. free-call waiver when the combined lifestyle qualifies.
+- Confirmed Trauma Team and R.E.O. membership availability, including Datapool naming and exact-title custom service/tier rules.
+- Confirmed custom matched tiers use their configured Emergency Response Rules formulas.
+- No functional changes from the validated v1.9.0-beta.2 candidate.
+
+## 1.9.0-beta.2
+
+- Fixed GM-assigned contacts appearing only on the GM client by moving assignments to a world-level directory that every targeted player merges into their private contact view.
+- Added live player-window refresh when the GM contact directory changes and automatic migration of v1.9.0-beta.1 GM assignments.
+- Preserved each player's private Recent Contacts, Saved Contacts, aliases, and remove/dismiss choices while keeping one-player assignments isolated from other players.
+- Kept assigned Player Characters usable when the receiving player cannot load that Actor sheet; messaging remains available and eb transfer requests route to the stored character owners.
+- Allowed an exact Gear Item title entered in a service's tier table to explicitly identify a completely custom R.E.O. or Trauma Team membership.
+- Recognized short R.E.O. names including `REO`, `R.E.O`, and `REO Plus` without matching unrelated words that merely contain those letters.
+- Prevented provider-only tier names such as `REO` from sanitizing to an empty match key.
+- Validated the supplied `Trauma Team Platinum`, `REO`, `R.E.O`, and `REO Plus` Gear Items against their configured response formulas.
+
+## 1.9.0-beta.1
+
+- Started a new beta line from the canonical v1.8.0 stable release.
+- Removed automatic player access to every Player Character in the world; the GM now explicitly assigns PC contacts just like NPC contacts.
+- Expanded **Manage Player Contacts** with separate NPC and Player Character pickers, one-player/All Players targeting, and removal of GM-added assignments.
+- Preserved existing NPC, GM-added, recent, saved, and player-managed contacts during the upgrade.
+- Kept owned Player Characters available in **From** while restricting the player **To** directory to assigned, saved, and recent contacts.
+- Preserved player-to-player eb transfers through GM-assigned Player Character contact entries.
+- Added a prominent README caution describing the v1.9.0 contact-access change before stable promotion.
+- Expanded active Gear recognition from `carried`/`equipped` to include the CPR `owned` state used by Datapool Lifestyles.
+- Added alternate emergency-service recognition for `Corpo-Care` Trauma coverage and `REO Meatsavers`, with or without the literal word `Membership`.
+- Hardened response-tier matching so decorative prefixes, service names, `Membership`/`Coverage` noise, and monthly-price suffixes do not prevent configured overrides from applying.
+- Added description-based monthly amount detection plus conservative custom food/housing lifestyle markers while retaining Diner Manager compatibility.
+
 ## 1.8.0
 
 - Promoted v1.8.0-beta.1 to stable after successful live GM and player validation.
