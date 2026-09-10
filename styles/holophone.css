@@ -433,6 +433,16 @@
   margin-top: 7px;
 }
 
+.holophone-contact-manager-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.holophone-contact-manager-actions .holophone-btn {
+  min-height: 42px;
+}
+
 .holophone-to-tools {
   display: flex;
   align-items: stretch;
@@ -1109,6 +1119,7 @@
   .holophone-grid-2,
   .holophone-emergency-grid,
   .holophone-contact-manager-grid,
+  .holophone-contact-manager-actions,
   .holophone-rule-basics,
   .holophone-rule-actions {
     grid-template-columns: 1fr;
