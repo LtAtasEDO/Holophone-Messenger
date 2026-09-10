@@ -1,8 +1,9 @@
 const MODULE_ID = "holophone";
-const MODULE_VERSION = "1.8.0";
+const MODULE_VERSION = "1.9.0";
 const PREF_FLAG = "icMessengerPrefs.v2";
 const RECEIPT_FLAG = "transactionReceipts";
 const PLAYER_CONTACT_FLAG = "playerContactBook.v1";
+const GM_CONTACT_DIRECTORY_SETTING = "gmContactDirectory";
 const SIMPLE_CALENDAR_MODULE_ID = "foundryvtt-simple-calendar";
 const MAX_PLAYER_CONTACTS = 100;
 const ERA_2045 = "#e64539";
@@ -56,6 +57,46 @@ const HOUSING_PATTERNS = [
   "luxury penthouse"
 ];
 
+const CUSTOM_HOUSING_TERMS = [
+  "apartment",
+  "conapt",
+  "flat",
+  "hotel",
+  "hostel",
+  "motel",
+  "penthouse",
+  "house",
+  "mansion",
+  "residence",
+  "housing",
+  "lodging",
+  "street",
+  "vehicle",
+  "container",
+  "studio",
+  "loft"
+];
+
+const SERVICE_NAME_ALIASES = {
+  trauma: ["trauma team", "corpo care"],
+  reo: ["reo meatwagon", "reo meatsavers", "meatwagon", "meatsavers", "reo"]
+};
+
+const MEMBERSHIP_TIER_NOISE = new Set([
+  "membership",
+  "memberships",
+  "member",
+  "members",
+  "coverage",
+  "plan",
+  "policy",
+  "service",
+  "tier",
+  "eb",
+  "month",
+  "monthly"
+]);
+
 let simpleCalendarClockWarningShown = false;
 
 function duplicate(value) {
@@ -83,6 +124,51 @@ function normalize(value = "") {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeServiceText(value = "") {
+  return normalize(value).replace(/\br e o\b/g, "reo");
+}
+
+function includesNormalizedPhrase(text, phrase) {
+  return ` ${text} `.includes(` ${phrase} `);
+}
+
+function normalizedItemText(item) {
+  const description = item?.system?.description?.value ?? item?.system?.description ?? "";
+  return normalizeServiceText(`${item?.name ?? ""} ${description}`);
+}
+
+function stripLeadingDecorators(value = "") {
+  return String(value).replace(/^[^\p{L}\p{N}]+/u, "").trim();
+}
+
+function removeNormalizedPhrase(text, phrase) {
+  return ` ${text} `.replaceAll(` ${phrase} `, " ").replace(/\s+/g, " ").trim();
+}
+
+function semanticTierKey(value = "") {
+  let text = normalizeServiceText(value);
+  const aliases = Object.values(SERVICE_NAME_ALIASES).flat().sort((a, b) => b.length - a.length);
+  for (const alias of aliases) text = removeNormalizedPhrase(text, alias);
+  return text.split(" ")
+    .filter((token) => token
+      && !MEMBERSHIP_TIER_NOISE.has(token)
+      && !/^\d+(?:eb)?$/.test(token))
+    .join(" ");
+}
+
+function responseTierKey(value = "") {
+  return semanticTierKey(value) || normalizeServiceText(value);
+}
+
+function tierDisplayLabel(value = "", fallback = "Standard") {
+  const key = semanticTierKey(value);
+  if (!key) return fallback;
+  return key.split(" ").map((word) => {
+    if (word === "vip") return "VIP";
+    return `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+  }).join(" ");
 }
 
 function isReservedNetworkContactAlias(value = "") {
@@ -151,7 +237,7 @@ function normalizeTierRules(value, fallback = []) {
   const seen = new Set();
   return source.map((entry) => {
     const match = String(entry?.match ?? "").trim().slice(0, 80);
-    const key = normalize(match);
+    const key = responseTierKey(match);
     const formula = String(entry?.formula ?? "").trim();
     if (!key || seen.has(key) || !validResponseFormula(formula)) return null;
     seen.add(key);
@@ -186,10 +272,15 @@ function resolveResponseFormula(service, membership = null) {
     return { formula: serviceRules.uncovered, source: "uncovered", match: "" };
   }
 
-  const tier = normalize(membership?.tier);
+  const tier = responseTierKey(membership?.tier || membership?.item?.name);
+  const itemName = normalizeServiceText(membership?.item?.name);
   const override = [...serviceRules.tiers]
-    .sort((a, b) => normalize(b.match).length - normalize(a.match).length)
-    .find((entry) => tier && tier.includes(normalize(entry.match)));
+    .sort((a, b) => responseTierKey(b.match).length - responseTierKey(a.match).length)
+    .find((entry) => {
+      const match = responseTierKey(entry.match);
+      const exactItemMatch = itemName && itemName === normalizeServiceText(entry.match);
+      return exactItemMatch || (tier && match && (tier === match || tier.includes(match)));
+    });
   return override
     ? { formula: override.formula, source: "tier", match: override.match }
     : { formula: serviceRules.membership, source: "membership", match: "" };
@@ -325,44 +416,135 @@ function ownedPlayerCharacterActors() {
   return playerCharacterActors().filter((actor) => actor.isOwner);
 }
 
-function playerContactBook(user = game.user) {
+function normalizeContactEntry(entry, { directoryAssigned = false } = {}) {
+  const alias = String(entry?.alias ?? entry?.name ?? "").trim().slice(0, 120);
+  if (!alias || isReservedNetworkContactAlias(alias)) return null;
+  const route = entry?.route === "gm" || (!entry?.actorId && !entry?.actorUuid) ? "gm" : "actor";
+  const actorId = route === "actor" ? String(entry?.actorId ?? "") : "";
+  const actorUuid = route === "actor" ? String(entry?.actorUuid ?? "") : "";
+  const fallbackId = actorUuid.split(".").at(-1) ?? "";
+  const actor = route === "actor" ? actorById(actorId || fallbackId) : null;
+  const actorKind = entry?.actorKind === "pc" || actorHasPlayerOwner(actor)
+    ? "pc"
+    : entry?.actorKind === "npc" || route === "actor"
+      ? "npc"
+      : "alias";
+  return {
+    id: String(entry?.id || makeId(16)),
+    alias,
+    route,
+    actorId,
+    actorUuid,
+    actorKind,
+    ownerUserIds: [...new Set((Array.isArray(entry?.ownerUserIds) ? entry.ownerUserIds : []).map(String).filter(Boolean))],
+    img: contactPortrait(entry?.img),
+    saved: Boolean(entry?.saved),
+    source: entry?.source === "gm" || directoryAssigned ? "gm" : "recent",
+    gmAssignmentId: String(entry?.gmAssignmentId || (directoryAssigned ? entry?.id : "") || ""),
+    directoryAssigned,
+    firstSeenAt: Math.max(0, Number(entry?.firstSeenAt) || Date.now()),
+    lastSeenAt: Math.max(0, Number(entry?.lastSeenAt) || Date.now())
+  };
+}
+
+function contactIdentityKey(entry) {
+  return `${entry?.route ?? ""}|${entry?.actorUuid || entry?.actorId || ""}|${normalize(entry?.alias)}`;
+}
+
+function rawPlayerContactState(user = game.user) {
   const raw = duplicate(user?.getFlag?.(MODULE_ID, PLAYER_CONTACT_FLAG) ?? {});
-  const source = Array.isArray(raw) ? raw : Array.isArray(raw.contacts) ? raw.contacts : [];
-  const contacts = source.map((entry) => {
-    const alias = String(entry?.alias ?? entry?.name ?? "").trim().slice(0, 120);
-    if (!alias) return null;
-    const route = entry?.route === "gm" || (!entry?.actorId && !entry?.actorUuid) ? "gm" : "actor";
-    return {
-      id: String(entry?.id || makeId(16)),
-      alias,
-      route,
-      actorId: route === "actor" ? String(entry?.actorId ?? "") : "",
-      actorUuid: route === "actor" ? String(entry?.actorUuid ?? "") : "",
-      img: contactPortrait(entry?.img),
-      saved: Boolean(entry?.saved),
-      source: entry?.source === "gm" ? "gm" : "recent",
-      firstSeenAt: Math.max(0, Number(entry?.firstSeenAt) || Date.now()),
-      lastSeenAt: Math.max(0, Number(entry?.lastSeenAt) || Date.now())
-    };
-  }).filter((entry) => entry && !isReservedNetworkContactAlias(entry.alias));
-  return { version: 2, contacts };
+  return {
+    raw,
+    contacts: Array.isArray(raw) ? raw : Array.isArray(raw.contacts) ? raw.contacts : [],
+    dismissedGMContactIds: Array.isArray(raw?.dismissedGMContactIds)
+      ? raw.dismissedGMContactIds.map(String).filter(Boolean)
+      : []
+  };
+}
+
+function gmContactDirectory(value = game.settings.get(MODULE_ID, GM_CONTACT_DIRECTORY_SETTING)) {
+  const source = value && typeof value === "object" ? value : {};
+  const users = {};
+  for (const [userId, entries] of Object.entries(source.users ?? {})) {
+    if (!Array.isArray(entries)) continue;
+    users[String(userId)] = entries
+      .map((entry) => normalizeContactEntry(entry, { directoryAssigned: true }))
+      .filter(Boolean);
+  }
+  return { version: 1, users };
+}
+
+function serializeGMContactDirectory(directory) {
+  const users = {};
+  for (const [userId, entries] of Object.entries(directory?.users ?? {})) {
+    users[userId] = entries.map((entry) => ({
+      id: String(entry.id || makeId(16)),
+      alias: String(entry.alias ?? "").trim().slice(0, 120),
+      route: entry.route === "gm" ? "gm" : "actor",
+      actorId: String(entry.actorId ?? ""),
+      actorUuid: String(entry.actorUuid ?? ""),
+      actorKind: entry.actorKind === "pc" ? "pc" : entry.actorKind === "alias" ? "alias" : "npc",
+      ownerUserIds: [...new Set((entry.ownerUserIds ?? []).map(String).filter(Boolean))],
+      img: contactPortrait(entry.img),
+      saved: false,
+      source: "gm",
+      firstSeenAt: Math.max(0, Number(entry.firstSeenAt) || Date.now()),
+      lastSeenAt: Math.max(0, Number(entry.lastSeenAt) || Date.now())
+    })).filter((entry) => entry.alias && !isReservedNetworkContactAlias(entry.alias));
+  }
+  return { version: 1, users };
+}
+
+function playerContactBook(user = game.user) {
+  const state = rawPlayerContactState(user);
+  const contacts = state.contacts
+    .map((entry) => normalizeContactEntry(entry))
+    .filter(Boolean);
+  const dismissed = new Set(state.dismissedGMContactIds);
+  const assignments = gmContactDirectory().users[String(user?.id ?? "")] ?? [];
+
+  for (const assignment of assignments) {
+    if (dismissed.has(assignment.gmAssignmentId)) continue;
+    const existing = contacts.find((entry) => contactIdentityKey(entry) === contactIdentityKey(assignment));
+    if (existing) {
+      existing.gmAssignmentId ||= assignment.gmAssignmentId;
+      existing.actorKind = assignment.actorKind;
+      existing.ownerUserIds = [...new Set([...existing.ownerUserIds, ...assignment.ownerUserIds])];
+      continue;
+    }
+    contacts.push(assignment);
+  }
+
+  return { version: 4, contacts, dismissedGMContactIds: [...dismissed] };
 }
 
 async function persistPlayerContactBook(user, book) {
   if (!user) return;
-  const contacts = [...(book?.contacts ?? [])]
+  const visibleContacts = [...(book?.contacts ?? [])]
     .filter((entry) => entry?.id
       && String(entry.alias ?? "").trim()
-      && !isReservedNetworkContactAlias(entry.alias))
+      && !isReservedNetworkContactAlias(entry.alias));
+  const personalContacts = visibleContacts
+    .filter((entry) => !entry.directoryAssigned || entry.saved)
+    .map((entry) => {
+      const persisted = { ...entry };
+      delete persisted.directoryAssigned;
+      return persisted;
+    })
     .sort((a, b) => Number(b.saved) - Number(a.saved)
       || Number(b.source === "gm") - Number(a.source === "gm")
       || b.lastSeenAt - a.lastSeenAt);
-  const saved = contacts.filter((entry) => entry.saved);
-  const gmContacts = contacts.filter((entry) => !entry.saved && entry.source === "gm");
-  const recent = contacts.filter((entry) => !entry.saved && entry.source !== "gm").slice(0, MAX_PLAYER_CONTACTS);
+  const saved = personalContacts.filter((entry) => entry.saved);
+  const gmContacts = personalContacts.filter((entry) => !entry.saved && entry.source === "gm");
+  const recent = personalContacts.filter((entry) => !entry.saved && entry.source !== "gm").slice(0, MAX_PLAYER_CONTACTS);
   const persisted = [...saved, ...gmContacts, ...recent];
-  if (book) book.contacts = persisted;
-  await user.setFlag(MODULE_ID, PLAYER_CONTACT_FLAG, { version: 2, contacts: persisted });
+  const dismissedGMContactIds = [...new Set((book?.dismissedGMContactIds ?? []).map(String).filter(Boolean))].slice(-500);
+  if (book) {
+    book.version = 4;
+    book.contacts = visibleContacts;
+    book.dismissedGMContactIds = dismissedGMContactIds;
+  }
+  await user.setFlag(MODULE_ID, PLAYER_CONTACT_FLAG, { version: 4, contacts: persisted, dismissedGMContactIds });
 }
 
 function playerOwnersForActors(actors = []) {
@@ -401,6 +583,7 @@ async function rememberIncomingContact({ actor = null, alias = "", recipients = 
         route,
         actorId,
         actorUuid,
+        actorKind: route === "actor" ? "npc" : "alias",
         img: contactImg,
         saved: false,
         source: "recent",
@@ -412,6 +595,7 @@ async function rememberIncomingContact({ actor = null, alias = "", recipients = 
       contact.alias = contactAlias;
       contact.actorId = actorId;
       contact.actorUuid = actorUuid;
+      contact.actorKind = route === "actor" ? "npc" : "alias";
       contact.img = contactImg;
       contact.lastSeenAt = now;
     }
@@ -427,8 +611,8 @@ function nonGMPlayerUsers() {
 
 async function grantPlayerContact({ actor = null, alias = "", userIds = [] } = {}) {
   if (!game.user.isGM) return ui.notifications.warn("Only a GM can add contacts to player address books.");
-  if (!isContactActor(actor) || actorHasPlayerOwner(actor)) {
-    return ui.notifications.warn("Choose a real NPC contact. Player Characters and containers are excluded.");
+  if (!isContactActor(actor)) {
+    return ui.notifications.warn("Choose a real Player Character or NPC contact. Container actors are excluded.");
   }
 
   const contactAlias = String(alias || actor.name || "").trim().slice(0, 120);
@@ -443,39 +627,108 @@ async function grantPlayerContact({ actor = null, alias = "", userIds = [] } = {
 
   const actorId = String(actor.id ?? "");
   const actorUuid = String(actor.uuid ?? `Actor.${actorId}`);
+  const actorKind = actorHasPlayerOwner(actor) ? "pc" : "npc";
   const identityKey = `actor|${actorUuid}|${normalize(contactAlias)}`;
   const contactImg = aliasPortrait(actor, contactAlias);
+  const ownerUserIds = actorKind === "pc" ? playerOwnersForActors([actor]).map((user) => user.id) : [];
   const now = Date.now();
-
+  const directory = gmContactDirectory();
   for (const user of targetUsers) {
-    const book = playerContactBook(user);
-    let contact = book.contacts.find((entry) => `${entry.route}|${entry.actorUuid}|${normalize(entry.alias)}` === identityKey);
-    if (!contact) {
-      contact = {
-        id: makeId(16),
-        alias: contactAlias,
-        route: "actor",
-        actorId,
-        actorUuid,
-        img: contactImg,
-        saved: false,
-        source: "gm",
-        firstSeenAt: now,
-        lastSeenAt: now
-      };
-      book.contacts.push(contact);
-    } else {
-      contact.alias = contactAlias;
-      contact.actorId = actorId;
-      contact.actorUuid = actorUuid;
-      contact.img = contactImg;
-      contact.source = "gm";
-      contact.lastSeenAt = now;
-    }
-    await persistPlayerContactBook(user, book);
+    const current = directory.users[user.id] ?? [];
+    const previous = current.find((entry) => contactIdentityKey(entry) === identityKey);
+    directory.users[user.id] = current.filter((entry) => contactIdentityKey(entry) !== identityKey);
+    directory.users[user.id].push({
+      id: makeId(16),
+      alias: contactAlias,
+      route: "actor",
+      actorId,
+      actorUuid,
+      actorKind,
+      ownerUserIds,
+      img: contactImg,
+      saved: false,
+      source: "gm",
+      firstSeenAt: previous?.firstSeenAt ?? now,
+      lastSeenAt: now
+    });
   }
 
+  await game.settings.set(MODULE_ID, GM_CONTACT_DIRECTORY_SETTING, serializeGMContactDirectory(directory));
+
   return { actor, alias: contactAlias, users: targetUsers };
+}
+
+async function revokePlayerContact({ actor = null, userIds = [] } = {}) {
+  if (!game.user.isGM) return ui.notifications.warn("Only a GM can remove GM-added contacts from player address books.");
+  if (!isContactActor(actor)) return ui.notifications.warn("Choose a real Player Character or NPC contact first.");
+
+  const requested = new Set((Array.isArray(userIds) ? userIds : [userIds]).map(String).filter(Boolean));
+  const targetUsers = nonGMPlayerUsers().filter((user) => requested.has(user.id));
+  if (!targetUsers.length) return ui.notifications.warn("Choose one player or All Players.");
+
+  const actorId = String(actor.id ?? "");
+  const actorUuid = String(actor.uuid ?? `Actor.${actorId}`);
+  const directory = gmContactDirectory();
+  let removed = 0;
+  for (const user of targetUsers) {
+    const assigned = directory.users[user.id] ?? [];
+    const remainingAssignments = assigned.filter((entry) => !(entry.route === "actor"
+      && (entry.actorUuid === actorUuid || (!entry.actorUuid && entry.actorId === actorId))));
+    removed += assigned.length - remainingAssignments.length;
+    directory.users[user.id] = remainingAssignments;
+
+    const state = rawPlayerContactState(user);
+    const remainingPersonal = state.contacts.filter((entry) => !(entry?.source === "gm"
+      && entry?.route === "actor"
+      && (String(entry?.actorUuid ?? "") === actorUuid
+        || (!entry?.actorUuid && String(entry?.actorId ?? "") === actorId))));
+    if (remainingPersonal.length !== state.contacts.length) {
+      removed += state.contacts.length - remainingPersonal.length;
+      await user.setFlag(MODULE_ID, PLAYER_CONTACT_FLAG, {
+        version: 4,
+        contacts: remainingPersonal,
+        dismissedGMContactIds: state.dismissedGMContactIds
+      });
+    }
+  }
+
+  await game.settings.set(MODULE_ID, GM_CONTACT_DIRECTORY_SETTING, serializeGMContactDirectory(directory));
+
+  return { actor, users: targetUsers, removed };
+}
+
+async function migrateLegacyGMContactsToDirectory() {
+  if (!game.user.isGM) return false;
+  const activeGM = game.users.activeGM;
+  if (activeGM && activeGM.id !== game.user.id) return false;
+
+  const directory = gmContactDirectory();
+  let changed = false;
+  for (const user of nonGMPlayerUsers()) {
+    const state = rawPlayerContactState(user);
+    const assigned = directory.users[user.id] ?? [];
+    for (const rawEntry of state.contacts) {
+      if (rawEntry?.source !== "gm") continue;
+      const contact = normalizeContactEntry(rawEntry);
+      if (!contact || contact.route !== "actor") continue;
+      if (assigned.some((entry) => contactIdentityKey(entry) === contactIdentityKey(contact))) continue;
+      const actor = actorById(contact.actorId || contact.actorUuid.split(".").at(-1));
+      assigned.push({
+        ...contact,
+        id: makeId(16),
+        ownerUserIds: contact.actorKind === "pc" && actor ? playerOwnersForActors([actor]).map((owner) => owner.id) : contact.ownerUserIds,
+        saved: false,
+        source: "gm",
+        firstSeenAt: contact.firstSeenAt,
+        lastSeenAt: Date.now()
+      });
+      changed = true;
+    }
+    directory.users[user.id] = assigned;
+  }
+
+  if (changed) await game.settings.set(MODULE_ID, GM_CONTACT_DIRECTORY_SETTING, serializeGMContactDirectory(directory));
+  return changed;
 }
 
 async function purgeReservedNetworkContacts() {
@@ -511,6 +764,10 @@ function parseMonthlyAmount(name = "") {
   return match ? Math.max(0, Number(match[1]) || 0) : null;
 }
 
+function itemDescription(item) {
+  return String(item?.system?.description?.value ?? item?.system?.description ?? "");
+}
+
 function getItemMarketValue(item) {
   const value = item?.system?.price?.market ?? item?.system?.price ?? 0;
   return Math.max(0, Number(value) || 0);
@@ -525,17 +782,65 @@ function getItemAmount(item) {
 function isActiveCarriedGear(item) {
   if (normalize(item?.type) !== "gear" || getItemAmount(item) <= 0) return false;
   const state = normalize(item?.system?.equipped ?? "");
-  return !state || state === "equipped" || state === "carried";
+  return !state || state === "equipped" || state === "carried" || state === "owned";
+}
+
+function itemMonthlyAmount(item) {
+  return parseMonthlyAmount(item?.name)
+    ?? parseMonthlyAmount(itemDescription(item))
+    ?? getItemMarketValue(item);
+}
+
+function cleanLifestyleLabel(value = "") {
+  return stripLeadingDecorators(value)
+    .replace(/\s*[-–—]?\s*\d[\d,]*\s*eb\s*\/\s*month.*$/i, "")
+    .trim() || "Custom Lifestyle";
+}
+
+function customFoodRank(amount) {
+  const monthly = Math.max(0, Number(amount) || 0);
+  return FOOD_TIERS.reduce((rank, tier) => monthly >= tier.monthly ? Math.max(rank, tier.rank) : rank, 1);
+}
+
+function isCustomFoodLifestyle(item) {
+  const text = normalizedItemText(item);
+  return text.includes("lifestyle package")
+    || text.includes("food lifestyle")
+    || text.includes("meal lifestyle");
 }
 
 function itemFoodTier(item) {
-  const name = normalize(item?.name);
+  const name = normalizeServiceText(item?.name);
   let best = FOOD_TIERS[0];
   for (const tier of FOOD_TIERS) {
     if (tier.rank <= best.rank) continue;
-    if (tier.aliases.some((alias) => name.includes(normalize(alias)))) best = tier;
+    if (tier.aliases.some((alias) => name.includes(normalizeServiceText(alias)))) best = tier;
   }
-  return best;
+  if (best.rank > 0 || !isCustomFoodLifestyle(item)) return best;
+  const monthly = itemMonthlyAmount(item);
+  return {
+    id: "custom",
+    label: cleanLifestyleLabel(item?.name),
+    rank: customFoodRank(monthly),
+    monthly,
+    aliases: []
+  };
+}
+
+function isHousingLifestyle(item) {
+  const name = normalizeServiceText(item?.name);
+  if (HOUSING_PATTERNS.some((pattern) => name.includes(normalizeServiceText(pattern)))) return true;
+
+  const description = normalizeServiceText(itemDescription(item));
+  const hasHousingTerm = CUSTOM_HOUSING_TERMS.some((term) => name.includes(normalizeServiceText(term)));
+  const hasLifestyleMarker = description.includes("housing lifestyle")
+    || description.includes("living space")
+    || description.includes("sleeps ")
+    || normalize(item?.system?.usage) === "always";
+  const hasMonthlyValue = parseMonthlyAmount(item?.name) !== null
+    || parseMonthlyAmount(itemDescription(item)) !== null
+    || getItemMarketValue(item) > 0;
+  return hasHousingTerm && (hasLifestyleMarker || hasMonthlyValue);
 }
 
 function inspectLifestyleFallback(actor) {
@@ -544,17 +849,16 @@ function inspectLifestyleFallback(actor) {
 
   for (const item of actor?.items ?? []) {
     if (!isActiveCarriedGear(item)) continue;
-    const name = normalize(item.name);
     const parsed = parseMonthlyAmount(item.name);
     const tier = itemFoodTier(item);
 
     if (tier.rank > 0) {
-      const market = getItemMarketValue(item);
-      foodMatches.push({ item, tier, amount: parsed ?? (market > 0 ? market : tier.monthly) });
+      const monthly = itemMonthlyAmount(item);
+      foodMatches.push({ item, tier, amount: parsed ?? (monthly > 0 ? monthly : tier.monthly) });
     }
 
-    if (HOUSING_PATTERNS.some((pattern) => name.includes(normalize(pattern)))) {
-      housingMatches.push({ item, amount: parsed ?? getItemMarketValue(item) });
+    if (isHousingLifestyle(item)) {
+      housingMatches.push({ item, amount: parsed ?? itemMonthlyAmount(item) });
     }
   }
 
@@ -578,49 +882,52 @@ function inspectLifestyleFallback(actor) {
 }
 
 function inspectLifestyle(actor) {
+  const localResult = inspectLifestyleFallback(actor);
   try {
     const dinerResult = game.dinerManager?.inspectLifestyle?.(actor);
     if (dinerResult && Number.isFinite(Number(dinerResult.totalMonthly))) {
       const foodMonthly = Math.max(0, Number(dinerResult.foodTier?.monthly ?? 0) || 0);
-      return {
+      const normalizedDinerResult = {
         ...dinerResult,
         foodMonthly,
         housingMonthly: Math.max(0, Number(dinerResult.housingMonthly ?? 0) || 0),
         totalMonthly: Math.max(0, Number(dinerResult.totalMonthly) || 0),
         source: "Diner Manager"
       };
+      return localResult.totalMonthly > normalizedDinerResult.totalMonthly
+        ? localResult
+        : normalizedDinerResult;
     }
   } catch (error) {
     console.warn(`${MODULE_ID} | Diner lifestyle lookup failed; using local detection.`, error);
   }
-  return inspectLifestyleFallback(actor);
+  return localResult;
 }
 
 function membershipCandidates(actor, service) {
-  const expected = service === "trauma" ? ["trauma team", "membership"] : ["reo meatwagon", "membership"];
+  const serviceKey = service === "trauma" ? "trauma" : "reo";
+  const aliases = SERVICE_NAME_ALIASES[serviceKey];
+  const exactConfiguredNames = new Set(responseRules()[serviceKey].tiers.map((entry) => normalizeServiceText(entry.match)));
   return [...(actor?.items ?? [])]
     .filter((item) => {
       if (!isActiveCarriedGear(item)) return false;
-      const name = normalize(item.name);
-      return expected.every((part) => name.includes(part));
+      const name = normalizeServiceText(item.name);
+      return aliases.some((alias) => includesNormalizedPhrase(name, alias))
+        || exactConfiguredNames.has(name);
     })
     .sort((a, b) => {
-      const monthlyA = parseMonthlyAmount(a.name) ?? getItemMarketValue(a);
-      const monthlyB = parseMonthlyAmount(b.name) ?? getItemMarketValue(b);
+      const monthlyA = itemMonthlyAmount(a);
+      const monthlyB = itemMonthlyAmount(b);
       return monthlyB - monthlyA || a.name.localeCompare(b.name);
     });
 }
 
 function membershipTier(item, service) {
   if (!item) return "None";
-  const raw = String(item.name).replace(/^_+/, "").trim();
+  const raw = stripLeadingDecorators(item.name);
   const colonMatch = raw.match(/membership\s*:\s*([^\-–—]+?)(?:\s*[\-–—]|$)/i);
-  if (colonMatch?.[1]?.trim()) return colonMatch[1].trim();
-
-  const serviceName = service === "trauma" ? "Trauma Team" : "R.E.O. Meatwagon";
-  const escapedService = serviceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace("R\\.E\\.O\\.", "R\\.?E\\.?O\\.?");
-  const loose = raw.match(new RegExp(`${escapedService}\\s+(.+?)\\s+membership`, "i"));
-  return loose?.[1]?.trim() || raw;
+  if (colonMatch?.[1]?.trim()) return tierDisplayLabel(colonMatch[1], service === "reo" ? "Standard" : "Membership");
+  return tierDisplayLabel(raw, service === "reo" ? "Standard" : "Membership");
 }
 
 function findMembership(actor, service) {
@@ -628,7 +935,7 @@ function findMembership(actor, service) {
   return item ? {
     item,
     tier: membershipTier(item, service),
-    monthly: parseMonthlyAmount(item.name) ?? getItemMarketValue(item)
+    monthly: itemMonthlyAmount(item)
   } : null;
 }
 
@@ -666,11 +973,9 @@ async function adjustWealthRaw(actor, delta, reason = "Messenger Transaction", r
   return true;
 }
 
-async function createDepositRequest(actor, delta, reason) {
-  const ownerLevel = (CONST.DOCUMENT_OWNERSHIP_LEVELS ?? CONST.DOCUMENT_PERMISSION_LEVELS).OWNER;
-  const owners = game.users.players.filter((user) => actor.testUserPermission?.(user, ownerLevel));
-  if (!owners.length) throw new Error(`No player owner exists for ${actor.name}; the transaction could not be delivered.`);
-
+async function postDepositRequest({ actorName, actorUuid, ownerUserIds = [], delta, reason }) {
+  const owners = [...new Set(ownerUserIds.map(String).filter(Boolean))];
+  if (!owners.length) throw new Error(`No player owner exists for ${actorName}; the transaction could not be delivered.`);
   const receiptId = makeId(24);
   const direction = delta >= 0 ? "Credit" : "Debit";
   const clock = currentChatClock();
@@ -679,20 +984,42 @@ async function createDepositRequest(actor, delta, reason) {
       <div class="holophone-chat-title">Incoming ${esc(currentTerm())} Transaction</div>
       <div><b>${esc(reason)}</b></div>
       <div><b>${direction}:</b> ${Math.abs(Math.trunc(delta))}eb</div>
-      <button type="button" class="holophone-deposit"><i class="fas fa-coins"></i> Apply to ${esc(actor.name)}</button>
+      <button type="button" class="holophone-deposit"><i class="fas fa-coins"></i> Apply to ${esc(actorName)}</button>
       ${chatClockHTML(clock)}
     </div>`;
 
   await ChatMessage.create({
-    whisper: owners.map((user) => user.id),
+    whisper: owners,
     content,
     speaker: ChatMessage.getSpeaker({ alias: currentTerm() }),
     flags: {
       [MODULE_ID]: {
-        deposit: { receiptId, actorUuid: actor.uuid, delta: Math.trunc(delta), reason },
+        deposit: { receiptId, actorUuid, delta: Math.trunc(delta), reason },
         clock: chatClockFlag(clock)
       }
     }
+  });
+}
+
+async function createDepositRequest(actor, delta, reason) {
+  const ownerLevel = (CONST.DOCUMENT_OWNERSHIP_LEVELS ?? CONST.DOCUMENT_PERMISSION_LEVELS).OWNER;
+  const owners = game.users.players.filter((user) => actor.testUserPermission?.(user, ownerLevel));
+  return postDepositRequest({
+    actorName: actor.name,
+    actorUuid: actor.uuid,
+    ownerUserIds: owners.map((user) => user.id),
+    delta,
+    reason
+  });
+}
+
+async function createRemoteDepositRequest(contact, delta, reason) {
+  return postDepositRequest({
+    actorName: contact.name,
+    actorUuid: contact.actorUuid,
+    ownerUserIds: contact.ownerUserIds,
+    delta,
+    reason
   });
 }
 
@@ -992,7 +1319,7 @@ function responseRulesFromDialog(root) {
       const match = String(row.querySelector(".holophone-tier-match")?.value ?? "").trim();
       const formula = String(row.querySelector(".holophone-tier-formula")?.value ?? "").trim();
       if (!match) throw new Error(`${service === "trauma" ? "Trauma Team" : "R.E.O."} tier overrides need a tier name.`);
-      const key = normalize(match);
+      const key = responseTierKey(match);
       if (seen.has(key)) throw new Error(`The tier override “${match}” appears more than once.`);
       if (!validResponseFormula(formula)) throw new Error(`${match} must use a valid dice formula such as 1d6+2 or 2d6.`);
       seen.add(key);
@@ -1303,6 +1630,9 @@ function actorPickerEntry(actor) {
 function contactPickerEntry(contact) {
   const fallbackId = String(contact.actorUuid ?? "").split(".").at(-1) ?? "";
   const actor = contact.route === "actor" ? actorById(contact.actorId || fallbackId) : null;
+  const actorKind = contact.actorKind === "pc" || actorHasPlayerOwner(actor) ? "pc" : contact.actorKind;
+  const ownerUserIds = [...new Set((contact.ownerUserIds ?? []).map(String).filter(Boolean))];
+  const remotePlayerContact = !actor && actorKind === "pc" && Boolean(contact.actorUuid) && ownerUserIds.length > 0;
   return {
     key: `contact:${contact.id}`,
     kind: "contact",
@@ -1310,18 +1640,28 @@ function contactPickerEntry(contact) {
     route: contact.route,
     actor,
     actorId: actor?.id ?? contact.actorId ?? "",
+    actorKind,
+    actorUuid: actor?.uuid ?? contact.actorUuid ?? "",
+    ownerUserIds,
+    remotePlayerContact,
     name: contact.alias,
     img: contactPortrait(contact.img ?? actor?.img),
-    group: contact.saved ? "SAVED CONTACTS" : contact.source === "gm" ? "GM CONTACTS" : "RECENT CONTACTS",
+    group: !contact.saved && contact.source === "gm" && actorKind === "pc"
+      ? "PLAYER CHARACTERS"
+      : contact.saved
+        ? "SAVED CONTACTS"
+        : contact.source === "gm"
+          ? "GM CONTACTS"
+          : "RECENT CONTACTS",
     saved: Boolean(contact.saved),
     source: contact.source === "gm" ? "gm" : "recent",
-    unavailable: contact.route === "actor" && !actor
+    unavailable: contact.route === "actor" && !actor && !remotePlayerContact
   };
 }
 
 function pickerEntries(kind, contactBook) {
   if (game.user.isGM) return allActors().map(actorPickerEntry);
-  const players = (kind === "From" ? ownedPlayerCharacterActors() : playerCharacterActors()).map(actorPickerEntry);
+  const players = (kind === "From" ? ownedPlayerCharacterActors() : []).map(actorPickerEntry);
   if (kind === "From") return players;
   const contacts = [...(contactBook?.contacts ?? [])]
     .sort((a, b) => Number(b.saved) - Number(a.saved)
@@ -1347,7 +1687,7 @@ function groupedPickerMenu(entries, selectedKeys = []) {
           ${contactPortraitHTML(entry.img, "holophone-pick-avatar", `${entry.name} contact portrait`)}
           <span class="holophone-pick-name">
             <b>${esc(entry.name)}</b>
-            ${entry.kind === "contact" ? `<small>${entry.saved ? "Saved contact" : entry.source === "gm" ? "Added by GM" : "Recent contact"}${entry.unavailable ? " · Unavailable" : ""}</small>` : ""}
+            ${entry.kind === "contact" ? `<small>${entry.saved ? "Saved contact" : entry.source === "gm" ? `${entry.actorKind === "pc" ? "Player Character · " : ""}Added by GM` : "Recent contact"}${entry.unavailable ? " · Unavailable" : ""}</small>` : ""}
           </span>
           <span class="holophone-pick-actions">
             ${entry.kind === "contact" && !entry.saved
@@ -1471,6 +1811,10 @@ function wirePicker(root, label, { onChange = null, contactBook = null, entryPro
       if (!contact) return;
       if (action === "save") contact.saved = true;
       if (action === "remove") {
+        if (contact.gmAssignmentId) {
+          contactBook.dismissedGMContactIds ??= [];
+          contactBook.dismissedGMContactIds.push(contact.gmAssignmentId);
+        }
         contactBook.contacts = contactBook.contacts.filter((candidate) => candidate.id !== entry.contactId);
         selection.delete(entry.key);
       }
@@ -1558,18 +1902,22 @@ async function openContactManager() {
         <div class="holophone-brand-copy">
           <div class="holophone-brand-kicker">DIRECTORY CONTROL // PRIVATE ACCESS</div>
           <div class="holophone-title">Player Contact Access</div>
-          <div class="holophone-subtitle">Add an NPC to one player's or every player's private directory.</div>
+          <div class="holophone-subtitle">Assign Player Characters and NPCs to one player's or every player's private directory.</div>
         </div>
         <div class="holophone-mode-chip">GM ONLY</div>
       </div>
       <div class="holophone-card">
         ${pickerHTML("NPC Contact", "Search NPCs…", [], false)}
-        <div class="holophone-muted holophone-contact-manager-note">Player Characters and container actors are excluded.</div>
+        <div class="holophone-muted holophone-contact-manager-note">NPCs remain hidden unless you assign them here or they message a player.</div>
+      </div>
+      <div class="holophone-card">
+        ${pickerHTML("Player Character", "Search Player Characters…", [], false)}
+        <div class="holophone-muted holophone-contact-manager-note">Player Characters are no longer shared automatically. Assign only the contacts this table should know.</div>
       </div>
       <div class="holophone-card holophone-contact-manager-grid">
         <label class="holophone-field">
           <span class="holophone-label">Contact Name / Alias</span>
-          <input type="text" class="holophone-contact-alias" maxlength="120" placeholder="Defaults to the NPC name">
+          <input type="text" class="holophone-contact-alias" maxlength="120" placeholder="Defaults to the selected actor name">
         </label>
         <label class="holophone-field">
           <span class="holophone-label">Add For</span>
@@ -1579,15 +1927,21 @@ async function openContactManager() {
           </select>
         </label>
       </div>
-      <button type="button" class="holophone-btn holophone-send holophone-grant-contact">
-        <i class="fas fa-user-plus"></i> Add to Player Contacts
-      </button>
-      <div class="holophone-muted holophone-tip">The contact appears under GM Contacts above Recent Contacts in the selected player interface. Players may save or remove it.</div>
+      <div class="holophone-contact-manager-actions">
+        <button type="button" class="holophone-btn holophone-send holophone-grant-contact">
+          <i class="fas fa-user-plus"></i> Add to Player Contacts
+        </button>
+        <button type="button" class="holophone-btn holophone-revoke-contact">
+          <i class="fas fa-user-minus"></i> Remove GM-Added Contact
+        </button>
+      </div>
+      <div class="holophone-muted holophone-tip">Assigned PCs appear under Player Characters; assigned NPCs appear under GM Contacts. Saved, recent, and player-managed contacts are preserved.</div>
     </div>`;
 
   let dialog = null;
   let busy = false;
   let npcAPI = null;
+  let pcAPI = null;
   dialog = new Dialog({
     title: "Manage Player Contacts",
     content,
@@ -1599,34 +1953,62 @@ async function openContactManager() {
       const aliasInput = root.querySelector(".holophone-contact-alias");
       const targetSelect = root.querySelector(".holophone-contact-target");
       const grantButton = root.querySelector(".holophone-grant-contact");
+      const revokeButton = root.querySelector(".holophone-revoke-contact");
       let generatedAlias = "";
 
       const npcEntries = () => allActors()
         .filter((actor) => !actorHasPlayerOwner(actor))
         .map(actorPickerEntry);
+      const pcEntries = () => playerCharacterActors().map(actorPickerEntry);
+
+      const updateAlias = (actor) => {
+        const currentAlias = aliasInput.value.trim();
+        if (!currentAlias || currentAlias === generatedAlias) {
+          generatedAlias = actor?.name ?? "";
+          aliasInput.value = generatedAlias;
+        }
+      };
+
       npcAPI = wirePicker(root, "NPC Contact", {
         entryProvider: npcEntries,
         onChange: (entries) => {
           const actor = entries[0]?.actor ?? null;
-          const currentAlias = aliasInput.value.trim();
-          if (!currentAlias || currentAlias === generatedAlias) {
-            generatedAlias = actor?.name ?? "";
-            aliasInput.value = generatedAlias;
-          }
+          if (!actor) return;
+          pcAPI?.setKeys([]);
+          updateAlias(actor);
         }
       });
 
+      pcAPI = wirePicker(root, "Player Character", {
+        entryProvider: pcEntries,
+        onChange: (entries) => {
+          const actor = entries[0]?.actor ?? null;
+          if (!actor) return;
+          npcAPI?.setKeys([]);
+          updateAlias(actor);
+        }
+      });
+
+      const selectedActor = () => npcAPI.getEntries()[0]?.actor ?? pcAPI.getEntries()[0]?.actor ?? null;
+      const selectedUserIds = () => {
+        const targetValue = targetSelect.value;
+        return targetValue === "all" ? players.map((user) => user.id) : [targetValue];
+      };
+
+      const setBusy = (value) => {
+        busy = value;
+        grantButton.disabled = value;
+        revokeButton.disabled = value;
+      };
+
       const grant = async () => {
         if (busy) return;
-        const actor = npcAPI.getEntries()[0]?.actor ?? null;
-        if (!actor) return ui.notifications.warn("Choose an NPC contact first.");
-        const targetValue = targetSelect.value;
-        const userIds = targetValue === "all" ? players.map((user) => user.id) : [targetValue];
+        const actor = selectedActor();
+        if (!actor) return ui.notifications.warn("Choose a Player Character or NPC contact first.");
 
-        busy = true;
-        grantButton.disabled = true;
+        setBusy(true);
         try {
-          const result = await grantPlayerContact({ actor, alias: aliasInput.value, userIds });
+          const result = await grantPlayerContact({ actor, alias: aliasInput.value, userIds: selectedUserIds() });
           if (!result) return;
           const audience = result.users.length === 1 ? result.users[0].name : `${result.users.length} players`;
           ui.notifications.info(`${result.alias} added to ${audience}.`);
@@ -1634,18 +2016,41 @@ async function openContactManager() {
           console.error(`${MODULE_ID} | Player contact assignment failed`, error);
           ui.notifications.error(error.message ?? "The contact could not be added to the selected player address book.");
         } finally {
-          busy = false;
-          grantButton.disabled = false;
+          setBusy(false);
+        }
+      };
+
+      const revoke = async () => {
+        if (busy) return;
+        const actor = selectedActor();
+        if (!actor) return ui.notifications.warn("Choose a Player Character or NPC contact first.");
+
+        setBusy(true);
+        try {
+          const result = await revokePlayerContact({ actor, userIds: selectedUserIds() });
+          if (!result) return;
+          const audience = result.users.length === 1 ? result.users[0].name : `${result.users.length} players`;
+          if (result.removed > 0) ui.notifications.info(`${actor.name} removed from ${audience}.`);
+          else ui.notifications.warn(`${actor.name} has no GM-added contact entry for ${audience}.`);
+        } catch (error) {
+          console.error(`${MODULE_ID} | Player contact removal failed`, error);
+          ui.notifications.error(error.message ?? "The contact could not be removed from the selected player address book.");
+        } finally {
+          setBusy(false);
         }
       };
 
       grantButton.addEventListener("click", grant);
+      revokeButton.addEventListener("click", revoke);
       aliasInput.addEventListener("keydown", (event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === "Enter") grant();
       });
     },
-    close: () => npcAPI?.destroy()
-  }, { width: 620, height: "auto", resizable: true });
+    close: () => {
+      npcAPI?.destroy();
+      pcAPI?.destroy();
+    }
+  }, { width: 680, height: "auto", resizable: true });
 
   dialog.render(true);
   return dialog;
@@ -1708,7 +2113,7 @@ async function openMessenger(input = null) {
     : Boolean(prefs.whisperToGM ?? prefs.whisper);
   const whisperLabel = game.user.isGM ? "Whisper to Player" : "Whisper to GM";
   const fromPlaceholder = game.user.isGM ? "Search player characters or NPCs…" : "Search your player characters…";
-  const toPlaceholder = game.user.isGM ? "Search player characters or NPCs…" : "Search player characters or contacts…";
+  const toPlaceholder = game.user.isGM ? "Search player characters or NPCs…" : "Search your assigned, saved, or recent contacts…";
 
   const content = `
     <div class="holophone-shell">
@@ -1813,12 +2218,13 @@ async function openMessenger(input = null) {
       <button type="button" class="holophone-btn holophone-send"><i class="fas fa-comment-dots"></i> Send IC</button>
       <div class="holophone-muted holophone-tip">${game.user.isGM
         ? "Ctrl/Cmd + Enter sends. Containers are excluded; contacts are separated into Player Characters and NPCs."
-        : "Ctrl/Cmd + Enter sends. Your directory contains Player Characters plus your saved, GM-added, and recent contacts."}</div>
+        : "Ctrl/Cmd + Enter sends. Your directory contains only contacts assigned by the GM or saved from prior messages."}</div>
     </div>`;
 
   let eraHook = null;
   let emergencyRulesHook = null;
   let playerContactHook = null;
+  let gmContactDirectoryHook = null;
   let dialog = null;
   let busy = false;
   const cleanup = [];
@@ -1838,14 +2244,20 @@ async function openMessenger(input = null) {
       cleanup.push(() => fromAPI.destroy(), () => toAPI.destroy());
 
       if (!game.user.isGM && contactBook) {
-        playerContactHook = (user) => {
-          if (user?.id !== game.user.id) return;
+        const refreshPlayerContacts = () => {
           const refreshed = playerContactBook(game.user);
           contactBook.version = refreshed.version;
           contactBook.contacts = refreshed.contacts;
+          contactBook.dismissedGMContactIds = refreshed.dismissedGMContactIds;
           toAPI.refresh();
         };
+        playerContactHook = (user) => {
+          if (user?.id !== game.user.id) return;
+          refreshPlayerContacts();
+        };
+        gmContactDirectoryHook = () => refreshPlayerContacts();
         Hooks.on("updateUser", playerContactHook);
+        Hooks.on("holophone-gmContactDirectory-changed", gmContactDirectoryHook);
       }
 
       const messageBox = query(".holophone-message");
@@ -1995,7 +2407,12 @@ async function openMessenger(input = null) {
           .map((entry) => entry.actor)
           .filter(Boolean)
           .map((actor) => [actor.id, actor])).values()];
-        if (!recipients.length && !relayContacts.length) return ui.notifications.warn("Pick at least one available recipient in To.");
+        const remotePlayerContacts = [...new Map(recipientEntries
+          .filter((entry) => entry.remotePlayerContact)
+          .map((entry) => [entry.actorUuid, entry])).values()];
+        if (!recipients.length && !remotePlayerContacts.length && !relayContacts.length) {
+          return ui.notifications.warn("Pick at least one available recipient in To.");
+        }
 
         const whisperPlayerIds = game.user.isGM && whisper.checked
           ? playerOwnersForActors(recipients.filter(actorHasPlayerOwner)).map((user) => user.id)
@@ -2018,7 +2435,7 @@ async function openMessenger(input = null) {
           return ui.notifications.warn("You must own the real From actor to transfer eb.");
         }
         if (!game.user.isGM && transferOn?.checked
-          && recipientEntries.some((entry) => entry.kind !== "actor" || !actorHasPlayerOwner(entry.actor))) {
+          && recipientEntries.some((entry) => !actorHasPlayerOwner(entry.actor) && !entry.remotePlayerContact)) {
           return ui.notifications.warn("Player transfers can only be sent to Player Character recipients.");
         }
 
@@ -2073,13 +2490,21 @@ async function openMessenger(input = null) {
         if (transferOn.checked) {
           const amount = Math.max(0, Math.trunc(Number(transferAmount.value) || 0));
           if (amount > 0) {
-            await adjustWealthRaw(fromActor, -(amount * recipients.length), `${term} Transfer (sent to ${ledgerTo})`);
+            await adjustWealthRaw(fromActor, -(amount * (recipients.length + remotePlayerContacts.length)), `${term} Transfer (sent to ${ledgerTo})`);
             for (const recipient of recipients) {
               try {
                 await adjustWealth(recipient, amount, `${term} Transfer (received from ${ledgerFrom})`);
               } catch (error) {
                 console.warn(`${MODULE_ID} | Transfer failed for ${recipient.name}`, error);
                 ui.notifications.warn(`Could not deliver the transfer to ${recipient.name}.`);
+              }
+            }
+            for (const contact of remotePlayerContacts) {
+              try {
+                await createRemoteDepositRequest(contact, amount, `${term} Transfer (received from ${ledgerFrom})`);
+              } catch (error) {
+                console.warn(`${MODULE_ID} | Remote transfer failed for ${contact.name}`, error);
+                ui.notifications.warn(`Could not deliver the transfer to ${contact.name}.`);
               }
             }
             note = `${amount}eb Transfer `;
@@ -2128,7 +2553,10 @@ async function openMessenger(input = null) {
               messenger: {
                 senderActorUuid: fromActor?.uuid ?? "",
                 senderAlias,
-                recipientActorIds: recipients.map((actor) => actor.id),
+                recipientActorIds: [...new Set([
+                  ...recipients.map((actor) => actor.id),
+                  ...remotePlayerContacts.map((contact) => contact.actorId).filter(Boolean)
+                ])],
                 relayAliases: relayContacts.map((entry) => entry.name),
                 whisperMode
               },
@@ -2196,6 +2624,7 @@ async function openMessenger(input = null) {
       if (emergencyRulesHook) Hooks.off("holophone-skipLifestyleChecks-changed", emergencyRulesHook);
       if (emergencyRulesHook) Hooks.off("holophone-responseRules-changed", emergencyRulesHook);
       if (playerContactHook) Hooks.off("updateUser", playerContactHook);
+      if (gmContactDirectoryHook) Hooks.off("holophone-gmContactDirectory-changed", gmContactDirectoryHook);
     }
   }, { width: 760, height: "auto", resizable: true });
 
@@ -2259,6 +2688,15 @@ Hooks.once("init", () => {
     default: duplicate(DEFAULT_RESPONSE_RULES),
     onChange: (value) => Hooks.callAll("holophone-responseRules-changed", value)
   });
+  game.settings.register(MODULE_ID, GM_CONTACT_DIRECTORY_SETTING, {
+    name: "GM Contact Directory",
+    hint: "GM-authored Player Character and NPC assignments keyed to individual player users.",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: { version: 1, users: {} },
+    onChange: (value) => Hooks.callAll("holophone-gmContactDirectory-changed", value)
+  });
   game._holoEraReg = true;
 });
 
@@ -2277,6 +2715,12 @@ Hooks.once("ready", async () => {
     console.warn(`${MODULE_ID} | Legacy contact portrait upgrade failed`, error);
   }
 
+  try {
+    await migrateLegacyGMContactsToDirectory();
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Legacy GM contact migration failed`, error);
+  }
+
   const api = {
     open: openMessenger,
     openMessenger,
@@ -2289,6 +2733,8 @@ Hooks.once("ready", async () => {
     postNetworkBroadcast,
     openContactManager,
     grantPlayerContact,
+    revokePlayerContact,
+    getGMContactDirectory: gmContactDirectory,
     inspectLifestyle,
     findTraumaMembership: (actor) => findMembership(actor, "trauma"),
     findREOMembership: (actor) => findMembership(actor, "reo"),
@@ -2301,4 +2747,3 @@ Hooks.once("ready", async () => {
   await ensureWorldMacro();
   console.log(`${MODULE_ID} | Ready v${MODULE_VERSION}. Use game.holophone.open()`);
 });
-
