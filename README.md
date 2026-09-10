@@ -134,6 +134,6 @@ game.holophone.getChatClock();
 
 Created by Lt Atlas for Cyberpunk RED on Foundry VTT, with development assistance from AI.
 
-The bundled terminal icon uses the human-authored Lucide **Circle User Round** icon under the ISC License and is recolored at runtime for the active Holophone/Agent era for presentation purposes. Full attribution and the license text are included in `THIRD_PARTY_NOTICES.md` in asset folder.
+The bundled terminal icon uses the human-authored Lucide **Circle User Round** icon under the ISC License and is recolored at runtime for the active Holophone/Agent era for presentation purposes. Full attribution and the license text are included in `THIRD_PARTY_NOTICES.md` in [asset](https://github.com/LtAtasEDO/Holophone-Messenger/tree/main/assets) folder.
 
 This project is unofficial fan tooling and is not affiliated with R. Talsorian Games, Foundry Gaming LLC, or CD PROJEKT RED.
