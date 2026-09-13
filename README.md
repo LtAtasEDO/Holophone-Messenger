@@ -1,4 +1,4 @@
-# Holophone/Agent Messenger™
+# Holophone/Agent Messenger for use with Cyberpunk RED
 
 A Foundry VTT 12 module for Cyberpunk RED v0.92.1+ that converts the Holophone/Agent Messenger macros into one player- and GM-aware interface.
 
@@ -129,6 +129,16 @@ game.holophone.getChatClock();
 - GMs receive **Whisper to Player** instead. It delivers the message only to the owners of Player Character actors selected in **To**, while keeping the sending GMs in the whisper. Selecting only NPC recipients produces a warning before the message or any ledger action is processed.
 - Private GM-to-player NPC or alias messages still add that sender to the receiving players' recent contacts.
 - Transfer deposits sent to another player are delivered as a one-time private Apply button. Applied transaction receipts are recorded on the recipient actor to prevent repeat clicks.
+
+## Legal / Homebrew Content Policy
+
+This is unofficial homebrew content for use with Cyberpunk RED.
+
+This project is provided free of charge under the R. Talsorian Games Homebrew Content Policy.
+
+Holophone/Agent Messenger for use with Cyberpunk RED is unofficial content provided under the Homebrew Content Policy of R. Talsorian Games and is not approved or endorsed by RTG. This content references materials that are the property of R. Talsorian Games and its licensees.
+
+Cyberpunk RED and related properties are the property of R. Talsorian Games and their respective licensees.
 
 ## Credits and Asset Notice
 
